@@ -1,0 +1,96 @@
+# GCP APIs: A Use Case Catalog for GenAI SRE
+
+![Page Header Image](https://storage.googleapis.com/gcp-header-image/gcp-api-brain.png)
+
+<br>
+
+<div style="background-color: #f0f4f7; border-left: 4px solid #4285f4; padding: 10px; margin-bottom: 20px;">
+  **🎯 Purpose:** This document provides a catalog of practical, API-driven automation patterns for the GenAI SRE team. Its goal is to reduce manual toil, improve the reliability of our AI/ML services, and provide robust governance for our GenAI workloads on GCP.<br><br>
+  **👥 Audience:** GenAI SREs, MLOps Engineers, and Cloud Architects involved in managing our GenAI platform.<br><br>
+  **✅ Scope:** The use cases focus on leveraging GCP APIs for the unique challenges of GenAI, including model training, endpoint serving, QPM management, cost management, and observability.
+</div>
+
+<br>
+
+## Table of Contents
+
+---
+
+## Why API-Driven Automation is Critical for GenAI SRE
+
+Managing GenAI workloads introduces unique reliability and cost challenges that cannot be managed effectively by manual operations. An API-first, automation-driven approach is essential for the following reasons:
+
+* **Extreme Cost Dynamics:** GPU/TPU-based training and inference are incredibly expensive. Automated monitoring via APIs is the only way to prevent massive cost overruns from inefficient code or runaway training jobs.
+* **Complex Failure Modes:** GenAI endpoints can fail in unique ways beyond simple HTTP errors, such as high "time to first token" latency, safety filter interventions, or hallucinations. These require specialized, automated monitoring.
+* **Dynamic & Ephemeral Infrastructure:** Training jobs, model versions, and datasets are constantly being created and destroyed. Automation is required to apply consistent monitoring and governance to these short-lived resources.
+* **Proactive Quota Management (QPM):** API usage for GenAI models is often subject to Queries Per Minute (QPM) or Tokens Per Minute (TPM) quotas. Automated monitoring and alerting on these quotas are essential to prevent API throttling and service disruption.
+
+---
+
+## Catalog of GenAI SRE Use Cases
+
+Below is a comprehensive list of high-impact use cases. The table details the value of each and the estimated effort to implement the automation.
+
+| Use Case | Relevant API Documentation URLs | Expanded Business Value (MLOps & Model Management Focus) | Implementation Effort |
+| :--- | :--- | :--- | :--- |
+| 1. Automated Dashboard Replication | ... | **Standardized Model Visibility:** Creates a consistent "Model Performance Dashboard" (latency, QPS, error rates, drift) for every deployed model.<br>**Reduces Toil:** Eliminates the manual work of building monitoring UIs for each new model version your team ships. | Medium |
+| _(The rest of your 20 use cases would follow here)_ | | | |
+| ... | | | |
+
+[Export to Sheets]
+
+---
+
+## Detailed Implementation Patterns
+
+This section provides a deeper look into the architecture and key API calls for the most critical GenAI SRE use cases.
+
+### Pattern 1: Dynamic Alerting for GenAI Model Endpoints
+
+**Problem:** New models are deployed to Vertex AI Endpoints without guaranteed performance monitoring, creating a reliability blind spot.
+
+**Solution Architecture:** Use an event-driven pattern. A Cloud Audit Log for a `DeployModel` event triggers a Cloud Function via Pub/Sub. The function then uses a template to create a suite of model-specific alerts via the **Cloud Monitoring API**.
+
+**Key GenAI Alerts to Create:**
+
+* **P99 Prediction Latency:** Alert when the time to process a request is too high.
+* **Time-to-First-Token Latency:** For streaming models, alert when the first token is slow to generate.
+* **Tokens-Per-Minute (TPM) Quota:** Proactively alert when usage approaches the model's rate limit.
+* **Safety Filter Invocations:** Create a log-based metric to track and alert on an unusual number of safety filter interventions, which might indicate misuse or problematic prompts.
+
+**Primary APIs:** Cloud Audit Logs, Cloud Monitoring API, Vertex AI API
+
+### Pattern 2: Proactive Cost Control for Model Training
+
+**Problem:** Long-running, distributed training jobs can incur huge, unexpected costs if they are misconfigured or fail to converge.
+
+**Solution Architecture:** Use the **Billing Budgets API** to create a programmatic budget with a Pub/Sub notification. When a cost threshold is crossed, a Cloud Function is triggered. This function can then cross-reference the cost data with active training jobs and either send a high-priority alert or, in extreme cases, execute a `trainingPipelines.cancel` call.
+
+**Key GenAI Cost Alerts:**
+
+* "Alert MLOps team if project `genai-training-prod` exceeds 75% of its weekly budget."
+* "Page the on-call SRE if a single training pipeline's attributed cost exceeds $5,000."
+
+**Primary APIs:** Billing Budgets API, Vertex AI API
+
+### Pattern 3: Quota Per Minute (QPM) Management and Configuration
+
+**Problem:** Unmanaged API usage can quickly exceed QPM limits, leading to HTTP 429 "Too Many Requests" errors and service interruptions for downstream applications.
+
+**Solution Architecture:** Instrument client applications to emit custom metrics to the **Cloud Monitoring API** for API usage. Create a Cloud Monitoring dashboard to visualize real-time QPM consumption and set up threshold-based alerts. The alerts can trigger an automated response via a Cloud Function that either sends a notification to the SRE team or, for critical workloads, automatically requests a temporary quota increase via the **Service Usage API**.
+
+**Key QPM Metrics & Actions:**
+
+* `gemini_api_requests_per_minute`: A counter metric to track the number of requests made to the Gemini API. An alert can be set at 80% of the allocated QPM quota.
+* **Proactive Quota Increase:** Use the Service Usage API to programmatically request a quota increase when sustained usage exceeds a high threshold.
+* **Automated Scaling:** Trigger an alert when QPM usage nears the limit for a specific model, prompting a manual or automated scale-out to a new project or endpoint with its own quota.
+
+**Primary APIs:** Cloud Monitoring API (for custom metrics), Service Usage API, Vertex AI API
+
+---
+
+## Getting Started & Next Steps
+
+* **Prioritize:** Start with one or two "Low Effort," high-impact use cases from the table, such as Automated Cost Anomaly Detection or SA Key Rotation Audits.
+* **Permissions:** Create a dedicated SRE service account with the necessary **IAM roles** (Monitoring Editor, Cloud Asset Viewer, Project IAM Admin, etc.) to execute these API calls.
+* **Code Repository:** All automation scripts and alert templates should be stored in our central Git repository to enable version control and peer review. (Link to your repo here).
