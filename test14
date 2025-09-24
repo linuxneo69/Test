@@ -1,0 +1,25 @@
+Clarification on Functional ID (FID) Onboarding Process for Dev Environment
+
+Hi AD Team,
+
+I am reaching out regarding the Functional ID (FID) onboarding process for the development environment.
+
+Previously, we had raised a request to onboard an FID to sky in order to:
+
+Authenticate Swagger UI endpoints using the FID token
+
+Generate Vault credentials (Vault Token, Vault ID, and Vault Secret)
+
+However, our request was rejected, and it was confirmed that the FID onboarding process for Dev/UAT environments has been deprecated.
+
+As we are planning to use an FID for our application workflows, we would like to check:
+
+Is there an alternative process available to onboard an FID for the development environment?
+
+Are there any workarounds or updated guidelines to enable FID integration with sky for Dev/UAT?
+
+If onboarding is no longer supported, what would be the recommended approach for applications requiring FID-based authentication in Dev?
+
+Your guidance on the current process or available alternatives would be greatly appreciated, as this is a critical dependency for our development and testing activities.
+
+Thanks in advance for your support.
