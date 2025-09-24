@@ -1,0 +1,172 @@
+# GCP Project Creation via CloudHub OmniCloud
+
+## 1. Introduction
+
+### 1.1 Purpose
+This document provides the standard operating procedure for requesting and creating new Google Cloud Platform (GCP) projects through the **CloudHub OmniCloud** platform. This process ensures all projects are provisioned in a secure, compliant, and auditable manner.
+
+### 1.2 Scope
+This procedure applies to all engineering and operations personnel requiring new GCP projects. It covers two distinct methods for request submission: the OmniCloud web interface and the REST API. It also details the mandatory process for tracking the status of these asynchronous requests.
+
+### 1.3 Process Overview
+The project creation process is **asynchronous**. The user first submits a request and receives a `jobID`. They then use this `jobID` or their NTID to poll a separate endpoint for the status of the creation job.
+
+**Flow:**
+
+`Request Submitted → Receive Job ID → Poll Status Endpoint → Project Provisioned`
+
+---
+
+## 2. Prerequisites
+
+- **Platform Access:** Valid credentials for the CloudHub OmniCloud UI.  
+- **Authentication Token:** A valid, non-expired **TOIN Bearer Token** is required for all API interactions.  
+- **Project Specifications:** All required metadata for the project must be gathered beforehand (see section 3.3 for details).  
+
+---
+
+## 3. Submitting a Project Request
+
+### 3.1 Method A: Manual Request via OmniCloud UI
+This method is intended for single project requests or users less familiar with API interactions.
+
+1. **Navigate** to the OmniCloud service catalog and select **"New GCP Project"**.  
+2. **Complete** the project details form as described in section 3.3.  
+3. **Submit** the request.  
+4. **Record the Job ID:** Upon successful submission, the confirmation screen will display a unique **`jobID`**. This ID is essential for tracking your request.  
+
+---
+
+### 3.2 Method B: Automated Request via OmniCloud API
+This method is designed for scripting and automation.  
+
+- **Endpoint:**  
+  `POST https://cloudhub.yourcompany.com/api/v1/omnicloud/workflows/createGcpProject`  
+- **Authentication:**  
+  `Authorization: Bearer <your_toin_token>`  
+- **Request Body:**  
+  JSON object with project specifications (see section 3.3).  
+- **Success Response (HTTP 202 Accepted):**  
+  A successful submission returns a JSON object containing the `jobID`.  
+
+**Sample JSON Response:**
+```json
+{
+  "jobID": "a1b2c3d4-e5f6-7890-g1h2-i3j4k5l6m7n8",
+  "status": "PENDING",
+  "message": "Project creation request has been accepted and is pending execution.",
+  "timestamp": "2025-09-24T10:30:00Z"
+}
+```
+
+---
+
+### 3.3 Request Body & Form Fields
+The following table describes the required parameters for both UI and API requests:
+
+| Field / JSON Key | Description                                | Example Value |
+|------------------|--------------------------------------------|---------------|
+| `projectName`    | Base name for your application/service.     | `Phoenix-App` |
+| `projectSuffix`  | A unique suffix (e.g., component).          | `payments-api` |
+| `environment`    | Deployment environment for the project.     | `dev` |
+| `department`     | Department or cost center for tracking.     | `Digital Engineering` |
+| `cloudProfiles`  | Object containing billing/chargeback info.  | `{"primary": "prod-billing", "secondary": "nonprod-billing"}` |
+| `ciCdDetails`    | Object with CI/CD integration details.      | `{"lightspeedProject": "phoenix-app", "pipeline": "phoenix-api-deploy"}` |
+
+---
+
+## 4. Checking the Project Creation Status
+
+After submitting the request, use the following API endpoint to poll for the job status.  
+
+### 4.1 Endpoint Details
+- **HTTP Method:** `GET`  
+- **URL by Job ID:**  
+  `https://cloudhub.yourcompany.com/api/v1/omnicloud/jobs/{jobID}`  
+- **URL by NTID:**  
+  `https://cloudhub.yourcompany.com/api/v1/omnicloud/jobs?ntid={userNTID}`  
+
+---
+
+### 4.2 Sample `curl` Commands
+
+**Check by `jobID`:**
+```bash
+TOIN_TOKEN="eyJhbGciOiJIUzI1NiIsIn..."
+JOB_ID="a1b2c3d4-e5f6-7890-g1h2-i3j4k5l6m7n8"
+
+curl --location --request GET "https://cloudhub.yourcompany.com/api/v1/omnicloud/jobs/$JOB_ID" \
+--header "Authorization: Bearer $TOIN_TOKEN"
+```
+
+**Check by `NTID`:**
+```bash
+TOIN_TOKEN="eyJhbGciOiJIUzI1NiIsIn..."
+NT_ID="your-nt-id"
+
+curl --location --request GET "https://cloudhub.yourcompany.com/api/v1/omnicloud/jobs?ntid=$NT_ID" \
+--header "Authorization: Bearer $TOIN_TOKEN"
+```
+
+---
+
+### 4.3 Interpreting the Status Response
+The API returns a JSON object describing the current state of the job.
+
+**Possible Statuses:**
+- `PENDING`: Request accepted, not yet started.  
+- `RUNNING`: Backend automation is actively processing.  
+- `SUCCESS`: GCP project created successfully.  
+- `FAILED`: Job failed (includes `errorDetails`).  
+
+**Sample SUCCESS Response:**
+```json
+{
+  "jobID": "a1b2c3d4-e5f6-7890-g1h2-i3j4k5l6m7n8",
+  "status": "SUCCESS",
+  "message": "GCP project has been created successfully.",
+  "gcpProjectId": "phoenix-app-payments-api-dev-12345",
+  "submittedBy": "your-nt-id",
+  "timestamp": "2025-09-24T10:35:00Z"
+}
+```
+
+---
+
+## 5. What's Next: Automating with a Java Service Module
+
+To streamline the lifecycle, the next phase is a **dedicated Java service module** that will serve as the primary interface for GCP project requests.  
+
+### 5.1 Architectural Vision
+Solution will include:
+- **Frontend UI Module** (wizard-like form).  
+- **Backend Service Module (Java)** for API orchestration and status polling.  
+
+**High-Level Flow:**  
+`User enters data in UI → Backend Java Module calls OmniCloud API → Backend polls status → UI displays results`
+
+---
+
+### 5.2 Component Breakdown
+
+**Frontend UI Module**
+- Provides intuitive wizard-like form.  
+- Client-side validation.  
+- Submits data to backend module.  
+
+**Backend API Client Module (Java)**
+- Orchestrates calls to OmniCloud API.  
+- Submits `POST /createGcpProject` requests.  
+- Polls `GET /jobs/{jobID}` until terminal state reached.  
+- Manages state, retries, error handling.  
+
+---
+
+### 5.3 Key Benefits
+- **Abstraction:** Users no longer need raw API knowledge.  
+- **Improved UX:** UI with validation, help text, real-time status.  
+- **Centralized Logic:** Retry/error handling in backend module.  
+- **Adoption:** Simplifies onboarding, encourages standardization.  
+````
+
+---
