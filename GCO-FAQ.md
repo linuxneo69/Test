@@ -1,5 +1,8 @@
+This documentation is designed for high-level architectural alignment while providing the ground-level detail needed for a successful Go-Live.
 
-# 📄 Confluence: Hybrid Observability Strategic Integration & Validation Plan
+---
+
+# 📄 Confluence: Hybrid Observability Strategic Integration & Validation
 
 **Document Status:** 🟢 DRAFT FOR ARCHITECTURAL REVIEW
 
@@ -7,86 +10,91 @@
 
 **Document Owner:** [Your Name/Architecture Team]
 
-**Key Stakeholders:** SRE, Cloud Infrastructure, Security, Operations Center (NOC)
+**Key Stakeholders:** SRE, Cloud Infrastructure, Operations Center (NOC)
 
 ---
 
-## 1. Architectural Context
+## 1. Architectural Overview
 
-To achieve a "Single Pane of Glass," we are transitioning our on-premise metric telemetry from a siloed Prometheus instance to **Google Cloud Managed Service for Prometheus (GMP)**. This allows us to leverage **Monarch** (Google’s planetary-scale time-series database) for long-term retention, global querying, and unified alerting within the **Google Cloud Observability (GCO)** suite.
+This initiative establishes a secure data bridge between on-premise telemetry and **Google Cloud Observability (GCO)**. We are leveraging **Prometheus Remote Write** to ship metrics to **Monarch** (Google’s global time-series database) to achieve centralized long-term retention and unified hybrid-cloud alerting.
 
 ---
 
 ## 2. Technical Discovery: Strategic Queries
 
-*The following questions are designed to flush out configuration gaps that often lead to data inconsistency or cost overruns.*
+*These queries are designed to be addressed in the stakeholder meeting to ensure the data pipeline is optimized for cost and performance.*
 
-### A. Metric Metadata & Pathing
-
-| Query | Context / Technical Rationale |
-| --- | --- |
-| **Prefix Identification** | **"Which metric prefix should we target in the GCO Metrics Explorer?"** <br>
-
-<br> *Rationale:* Depending on the collector version, metrics usually appear under `prometheus.googleapis.com/` or `external.googleapis.com/prometheus/`. We need this to standardize our dashboard JSONs. |
-| **Resource Mapping** | **"Are metrics mapped to the `prometheus_target` or `generic_node` resource type?"** <br>
-
-<br> *Rationale:* GCO groups data by Resource Type. If the mapping is incorrect, filters like `resource.label.node_id` will return null values in our widgets. |
-| **Labeling Strategy** | **"What 'External Labels' (e.g., `env`, `site`, `cluster`) are appended at the source?"** <br>
-
-<br> *Rationale:* These labels act as our primary dimensions for multi-cluster filtering. Without them, we cannot distinguish between Production and Staging traffic. |
-
-### B. Ingestion & Pipeline Integrity
-
-| Query | Context / Technical Rationale |
-| --- | --- |
-| **Ingestion SLO** | **"What is the target end-to-end latency (lag) from an on-premise event to GCO visualization?"** <br>
-
-<br> *Rationale:* If the pipeline lag exceeds 120s, we must de-prioritize GCO for "flash-incident" response and use it primarily for trend analysis and secondary alerting. |
-| **Frequency Jitter** | **"What is the Delta between the 'Scrape Interval' and 'Remote Write' frequency?"** <br>
-
-<br> *Rationale:* A 15s scrape with a 60s write creates "steppy" graphs. We need to align these to ensure smooth visualization in GCO widgets. |
-| **Metric Pruning** | **"Are any `relabel_configs` active to drop high-cardinality labels (e.g., `pod_id`)?"** <br>
-
-<br> *Rationale:* To manage GCP costs, we must confirm if critical troubleshooting labels are being stripped before they hit the cloud. |
+| Category | Strategic Query | Architect's Intent / Rationale |
+| --- | --- | --- |
+| **Pathing** | **"Which metric prefix should we target in the GCO Metrics Explorer?"** | To standardize dashboards. We must confirm if metrics appear under `prometheus.googleapis.com/` or `external.googleapis.com/`. |
+| **Topology** | **"Are metrics mapped to the `prometheus_target` or `generic_node` resource type?"** | Resource mapping dictates how GCO groups data. Incorrect mapping causes "null" results when filtering by `node_id`. |
+| **Labels** | **"What 'External Labels' (e.g., `env`, `site`) are appended at the source?"** | Essential for multi-cluster filtering. Without these, we cannot distinguish between "On-Prem" and "GCP-Native" traffic. |
+| **SLO** | **"What is the target end-to-end ingestion lag for on-premise events?"** | Defines the threshold for "Real-time" response. If lag > 120s, GCO is for trend analysis; local is for flash-incident response. |
+| **Jitter** | **"What is the Delta between 'Scrape Interval' and 'Remote Write' frequency?"** | A 15s scrape with a 60s write creates "steppy" graphs. Alignment is required for smooth visual fidelity in GCO widgets. |
+| **Pruning** | **"Are any `relabel_configs` active to drop high-cardinality labels at the source?"** | To manage costs, we must know if critical troubleshooting labels (e.g., `pod_id`) are being stripped before ingestion. |
 
 ---
 
-## 3. Validation & Test Scenarios
+## 3. Test & Validation Scenarios (UAT)
 
-*The following scenarios must be validated by the SRE team.*
+*Each scenario must be validated and signed off. "Failure Criteria" are included to help identify common integration pitfalls.*
 
-### 🧪 Test Scenario 1: Dashboard Data Parity & Fidelity
+### 🧪 Scenario 1: Dashboard Data Parity
 
-* **Objective:** Ensure GCO widgets accurately reflect the on-premise reality.
-* **Step:** Select a mission-critical metric (e.g., `request_latency_ms`). Compare the 5-minute moving average in On-Prem Grafana vs. GCO Dashboard.
-* **Success Criteria:** Variance between sources must be **< 3%**.
-* **Verification:** Ensure that "Template Variables" in GCO correctly filter all charts simultaneously.
+**Objective:** Confirm GCO accurately reflects the on-premise state.
 
-### 🧪 Test Scenario 2: End-to-End Alerting & NOC Notification
+* **Steps:** Select a high-traffic metric (e.g., `request_latency_ms`). Compare the 5-minute moving average in On-Prem Grafana vs. a GCO Widget.
+* **✅ Success Criteria:** * Variance between sources is **< 3%**.
+* Template variables (e.g., Cluster dropdown) correctly filter all charts.
 
-* **Objective:** Confirm that GCO can act as a reliable source for incident management.
-* **Step:** Artificially breach a threshold on a non-critical service (e.g., set `service_memory_usage > 10%`).
-* **Success Criteria:** 1. GCO triggers an **Incident** within 90 seconds.
-2. The Notification Channel (Slack/PagerDuty/Email) receives a payload containing the `cluster_name` and `severity`.
-3. The Ops Team confirms they can navigate from the alert directly to the relevant GCO Dashboard.
 
-### 🧪 Test Scenario 3: Log Explorer Freshness & Parsing
+* **❌ Failure Criteria (Red Flags):**
+* **Data Flatlining:** GCO shows a straight line while on-prem shows variability (indicates batching/queue issues).
+* **"Unknown" Metric Type:** PromQL functions like `rate()` fail because metric type metadata was dropped.
+* **Label Mismatch:** Metrics appear but lack the `env` or `site` labels required for filtering.
 
-* **Objective:** Ensure logs are searchable and correctly indexed.
-* **Step:** Run a search for a specific `correlation_id` generated on-prem within the last 5 minutes.
-* **Success Criteria:** 1. Log entry appears with a timestamp within **60 seconds** of actual event time.
-2. JSON payloads are correctly parsed (labels like `level`, `module`, and `user_id` are indexed as searchable fields).
-3. Severity mapping is accurate (On-prem `FATAL` mapped to GCO `CRITICAL`).
+
+
+### 🧪 Scenario 2: Alerting & NOC Notification
+
+**Objective:** Validate the reliability of the "Cloud-Triggered" alert loop.
+
+* **Steps:** Set a synthetic "Critical" threshold in GCO (e.g., `memory_utilization > 5%` for a test pod).
+* **✅ Success Criteria:** * GCO Incident is created within **90 seconds**.
+* NOC confirms receipt of notification via Slack/PagerDuty with full context (Server Name, Metric Value).
+
+
+* **❌ Failure Criteria (Red Flags):**
+* **Delayed Firing:** Alert takes > 5 minutes to trigger (indicates Remote Write queue backlog).
+* **Missing Metadata:** Alert arrives but doesn't tell the NOC *which* datacenter or cluster is affected.
+* **"Flapping" Alerts:** GCO triggers and clears the alert rapidly due to data ingestion gaps.
+
+
+### 🧪 Scenario 3: Log Explorer Freshness
+
+**Objective:** Ensure logs are searchable and correctly categorized.
+
+* **Steps:** Generate a unique log string (e.g., `TEST_LOG_ID_001`) on-prem and search in Log Explorer.
+* **✅ Success Criteria:** * Log entry appears in GCO within **60 seconds**.
+* Severity mapping is correct (e.g., On-prem `FATAL` appears as `CRITICAL` in GCO).
+
+
+* **❌ Failure Criteria (Red Flags):**
+* **Timestamp Skew:** Log appears but is "hidden" in the past or future due to time-sync issues between On-prem and GCP.
+* **Unstructured Payloads:** JSON logs from on-premise appear as a single "text" string, making individual fields unsearchable.
+* **Missing Resource ID:** Logs are present but cannot be correlated to a specific model or Containers.
+
 
 ---
 
 ## 4. Governance & Lifecycle
 
-* **Retention:** Data is stored in Monarch for **24 months** by default.
+* **Data Retention:** On-premise metrics ingested into the Monarch backend will follow the standard **24-month retention** policy unless otherwise specified for compliance.
+* **Archiving:** Historical data beyond 24 months is currently **not** scoped for export to Cloud Storage buckets.
 
 ---
 
-## 5. Next Steps & Meeting Agenda
+## 5. Next Steps
 
-1. **Cloud Observability Team:** Provide values for the 6 Strategic Queries in Section 2.
-2. **SRE Team:** Execute the 3 Test Scenarios in the `Development` project.
+1. **Ops Team:** Review Section 2 and provide the specific Prefix and Labeling values.
+2. **SRE Team:** Execute the 3 Test Scenarios in the `Staging` project and document the results below.
