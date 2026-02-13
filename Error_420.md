@@ -40,3 +40,11 @@ sum by (model_id, resource_container) (
 
 ---
 
+# Summing 429 errors using the prediction_count metric
+sum by (resource_container, model_id) (
+  rate(aiplatform_googleapis_com:prediction_online_prediction_count{
+    response_code="429"
+  }[2m])
+) * 120 > 10
+
+When to use which metric?If you are using...Use this PQL MetricCustom Models (AutoML, XGBoost, etc.)aiplatform_googleapis_com:prediction_online_prediction_countFoundation Models (Gemini, Claude, etc.)
