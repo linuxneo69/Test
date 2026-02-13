@@ -29,6 +29,23 @@ Raw counts can be misleading (10 errors is a lot for a small project, but tiny f
   )
 ) > 0.05  
 
+**Project Specific:
+**
+(
+  sum by (model_id) (
+    rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_count{
+      response_code!="200", 
+      resource_container="your-project-id"
+    }[2m])
+  )
+  /
+  sum by (model_id) (
+    rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_count{
+      resource_container="your-project-id"
+    }[2m])
+  )
+) > 0.05
+
 ---
 To alert on any response code starting with 5 in your unified project, use the Regex Matcher (=~) with the pattern 5...
 # Alert on any 5xx error across models and projects
