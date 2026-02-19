@@ -136,3 +136,15 @@ Trying this -
     aiplatform.googleapis.com/prediction/online/dedicated_token_limit{project_id="your-project-id"}
   )
 ) > 0.9
+
+---
+
+(
+  sum by (model_id) (
+    rate(aiplatform_googleapis_com:prediction_online_consumed_token_throughput{resource_container="your-project-id"}[5m])
+  )
+  /
+  sum by (model_id) (
+    aiplatform_googleapis_com:prediction_online_dedicated_token_limit{resource_container="your-project-id"}
+  )
+) > 0.9
