@@ -111,7 +111,7 @@ NOT Working GSU Burndown:
 ) > 0.9
 
 
-Working one -
+not working one -
 (
   sum by (model_id) (
     rate(aiplatform_googleapis_com:prediction_online_consumed_token_throughput{
@@ -123,5 +123,16 @@ Working one -
     aiplatform_googleapis_com:prediction_online_dedicated_token_limit{
       resource_container="your-project-id"
     }
+  )
+) > 0.9
+
+Trying this -
+(
+  sum by (model_id) (
+    rate(aiplatform.googleapis.com/prediction/online/consumed_token_throughput{project_id="your-project-id"}[5m])
+  )
+  /
+  sum by (model_id) (
+    aiplatform.googleapis.com/prediction/online/dedicated_token_limit{project_id="your-project-id"}
   )
 ) > 0.9
