@@ -65,3 +65,20 @@ sum by (resource_container, model_id) (
 ) * 120 > 10
 
 When to use which metric?If you are using...Use this PQL MetricCustom Models (AutoML, XGBoost, etc.)aiplatform_googleapis_com:prediction_online_prediction_countFoundation Models (Gemini, Claude, etc.)
+
+---
+## The PQL Query for GSU Burndown
+# This query monitors your Provisioned Throughput (Dedicated) and calculates if you are consistently hitting 90% of your allocated capacity.
+
+# Alert if GSU utilization is > 90% for a sustained period
+avg_over_time(
+  aiplatform_googleapis_com:prediction_online_dedicated_token_limit_utilization{
+    resource_container="your-project-id"
+  }[30m]
+) > 0.9
+
+# Pro-Tip: The "Fast Burn" Alert
+In SRE best practices, a 30-minute 90% alert is great for capacity planning, but it might be too slow for a sudden traffic spike. Many teams set a secondary alert for a "Fast Burn":
+
+Slow Burn (Capacity): 90% usage for 30 minutes (Your requested alert).
+Fast Burn (Emergency): 98% usage for 2 minutes (Immediate page).
