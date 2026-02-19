@@ -96,3 +96,5 @@ If that returns an error, use the "Total Consumed" metric instead: Sometimes Goo
   sum(aiplatform_googleapis_com:prediction_online_dedicated_token_limit)
 ) > 0.9
 
+Retest Window: 30min
+Evaluation: 1min
