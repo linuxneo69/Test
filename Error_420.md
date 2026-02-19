@@ -98,3 +98,14 @@ If that returns an error, use the "Total Consumed" metric instead: Sometimes Goo
 
 Retest Window: 30min
 Evaluation: 1min
+
+Working GSU Burndown:
+(
+  sum by (model_id) (
+    rate(aiplatform.googleapis.com/prediction/online/consumed_token_throughput[5m])
+  )
+  /
+  sum by (model_id) (
+    aiplatform.googleapis.com/prediction/online/dedicated_token_limit
+  )
+) > 0.9
