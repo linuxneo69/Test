@@ -82,3 +82,17 @@ In SRE best practices, a 30-minute 90% alert is great for capacity planning, but
 
 Slow Burn (Capacity): 90% usage for 30 minutes (Your requested alert).
 Fast Burn (Emergency): 98% usage for 2 minutes (Immediate page).
+
+---
+The Exact PQL Name
+If you are using the PromQL (PQL) editor, type this exact string: aiplatform_googleapis_com:prediction_online_dedicated_token_limit_utilization
+
+If that returns an error, use the "Total Consumed" metric instead: Sometimes Google updates the labels. If the utilization metric is missing, you can manually calculate it by dividing your consumed throughput by your limit:
+
+# Manual calculation of GSU utilization
+(
+  sum(rate(aiplatform_googleapis_com:prediction_online_consumed_token_throughput[5m]))
+  /
+  sum(aiplatform_googleapis_com:prediction_online_dedicated_token_limit)
+) > 0.9
+
