@@ -1,0 +1,334 @@
+#  Vertex AI SRE Playbook: Unified Multi-Project Alerting for Gemini 2.5 Pro
+
+This document serves as the comprehensive, step-by-step engineering guide for configuring a **Unified Metrics Scope Alerting Suite** for Google Cloud Vertex AI.
+
+By utilizing a central "Scoping Project," this architecture allows you to write a single PromQL alert policy that dynamically monitors all sub-projects (e.g., your 10 initiative projects) simultaneously. When an alert fires, it automatically identifies the specific failing project and model, routing actionable context directly to your on-call engineers.
+
+---
+
+##  Phase 1: Architecture & Prerequisites
+
+Before creating individual alerts, you must configure your Google Cloud environment to support multi-project observability.
+
+### 1. Configure the Metrics Scope (The "Unified" Project)
+
+1. Navigate to the **Google Cloud Console** and select your primary "Unified Initiative" project (the central hub).
+2. Go to **Monitoring > Settings**.
+3. Under the **Metrics Scope** tab, click **Add GCP Projects**.
+4. Select all 10 sub-projects that host your Gemini models.
+5. *Result:* Your central project can now read metrics from all attached projects. All alerts created in this project will automatically evaluate data across the entire scope.
+
+### 2. The Dynamic Grouping Logic (PromQL)
+
+To make one alert work for multiple projects without mixing their data together, we use PromQL's grouping functions.
+
+* ❌ **Bad (Hardcoded):** `filter resource_container="project1"`
+* ❌ **Bad (Aggregated):** `sum(rate(...))` -> *This blends all 10 projects into one giant metric.*
+* ✅ **Good (Dynamic):** `sum by (resource_container, model_user_id) (rate(...))` -> *This evaluates each project independently and creates a separate incident for the specific project that breaches the threshold.*
+
+---
+
+## ⚙️ Phase 2: Alert Creation Protocol (UI Steps)
+
+For every alert listed in Phase 3, follow this exact creation sequence in the Google Cloud Console:
+
+1. Go to **Monitoring > Alerting > + Create Policy**.
+2. Click on **Select a Metric**, then click the **<> PromQL** button (or MQL/PromQL tab) to open the code editor.
+3. Paste the provided **PromQL Query**.
+4. Set the **Condition Type** to `Threshold`.
+5. Set the **Alert trigger** to `Any time series violates`.
+6. Enter the designated **Threshold value** (e.g., `0.05` for 5%).
+7. Under **Notifications and name**, configure your notification channels (Slack, PagerDuty, Email).
+8. Paste the provided **Documentation Template** into the Documentation field.
+9. Enter the **Alert Policy Name** and click **Create Policy**.
+
+---
+
+## 🚨 Phase 3: The Unified Alerting Suite
+
+Below are the 6 critical alert policies required for a production-grade Vertex AI deployment.
+
+### 1. Quota Throttling (429 Rate Limit)
+
+**Purpose:** Detects when a specific project is hitting its Vertex AI API quota limits and requests are being actively rejected.
+
+* **Alert Name:** `Unified | 429 Quota Throttling > 2% | Gemini-2.5-Pro`
+* **Condition:** `> 0.02` (2% of traffic)
+* **PromQL:**
+
+```promql
+(
+  sum by (resource_container, model_user_id) (
+    rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_count{
+      response_code="429",
+      model_user_id="gemini-2.5-pro"
+    }[15m])
+  )
+  /
+  sum by (resource_container, model_user_id) (
+    rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_count{
+      model_user_id="gemini-2.5-pro"
+    }[15m])
+  )
+) > 0.02
+
+```
+
+* **Documentation Template:**
+
+```markdown
+# ⚠️ 429 Rate Limit Breach Detected
+**Project ID:** `${resource.labels.project_id}`
+**Model:** `${metric.labels.model_user_id}`
+
+**Details:** More than 2% of requests to Gemini in `${resource.labels.project_id}` are failing with an HTTP 429 (Too Many Requests) over the last 15 minutes. 
+
+**Playbook:**
+1. Verify if this project has an unexpected traffic spike.
+2. Check the Google Cloud Quotas page for this specific project.
+3. If sustained, request a quota increase for Vertex AI API limits.
+
+```
+
+---
+
+### 2. Client Cancellations / Ghost Requests (499 Errors)
+
+**Purpose:** Detects when the model is taking too long to respond, causing the user's browser or the backend application to close the connection before receiving the answer.
+
+* **Alert Name:** `Unified | 499 Client Cancel Rate > 5% | Gemini-2.5-Pro`
+* **Condition:** `> 0.05`
+* **PromQL:**
+
+```promql
+(
+  sum by (resource_container, model_user_id) (
+    rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_count{
+      response_code="499",
+      model_user_id="gemini-2.5-pro"
+    }[15m])
+  )
+  /
+  sum by (resource_container, model_user_id) (
+    rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_count{
+      model_user_id="gemini-2.5-pro"
+    }[15m])
+  )
+) > 0.05
+
+```
+
+* **Documentation Template:**
+
+```markdown
+# ⏱️ High Client Timeout Rate (499)
+**Project ID:** `${resource.labels.project_id}`
+**Model:** `${metric.labels.model_user_id}`
+
+**Details:** Clients interacting with `${resource.labels.project_id}` are dropping connections (499). This usually means the model's Time-To-First-Token is too slow, or the frontend timeout settings are too aggressive.
+
+**Playbook:**
+1. Check the Latency metrics for this project.
+2. Verify if users are submitting excessively large payloads (images/video).
+3. Ensure frontend API timeout is set to at least 60 seconds.
+
+```
+
+---
+
+### 3. Server-Side Failures (500 & 503 Errors)
+
+**Purpose:** Detects Google-side outages or internal container crashes. We use a regex `=~"50[03]"` to capture both Internal Server Errors (500) and Service Unavailable (503).
+
+* **Alert Name:** `Unified | CRITICAL 5xx Server Errors > 1% | Gemini-2.5-Pro`
+* **Condition:** `> 0.01` (1% is critical for 5xx)
+* **PromQL:**
+
+```promql
+(
+  sum by (resource_container, model_user_id) (
+    rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_count{
+      response_code=~"50[03]",
+      model_user_id="gemini-2.5-pro"
+    }[15m])
+  )
+  /
+  sum by (resource_container, model_user_id) (
+    rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_count{
+      model_user_id="gemini-2.5-pro"
+    }[15m])
+  )
+) > 0.01
+
+```
+
+* **Documentation Template:**
+
+```markdown
+# 🚨 CRITICAL: 5xx Vertex API Errors
+**Project ID:** `${resource.labels.project_id}`
+**Model:** `${metric.labels.model_user_id}`
+
+**Details:** The Google Cloud backend is returning 500/503 errors for `${resource.labels.project_id}`. This is likely an infrastructure issue or a malformed request that crashed the endpoint.
+
+**Playbook:**
+1. Check the Google Cloud Status Dashboard immediately.
+2. Review the logs for this project to see if specific complex prompts are causing engine crashes.
+
+```
+
+---
+
+### 4. General Error Rate (Any Non-200)
+
+**Purpose:** A catch-all safety net. If total errors (including 400 Bad Request, 403 Forbidden, etc.) exceed 5%, something is fundamentally wrong with the integration.
+
+* **Alert Name:** `Unified | Total Non-200 Error Rate > 5% | Gemini-2.5-Pro`
+* **Condition:** `> 0.05`
+* **PromQL:**
+
+```promql
+(
+  sum by (resource_container, model_user_id) (
+    rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_count{
+      response_code!="200",
+      model_user_id="gemini-2.5-pro"
+    }[15m])
+  )
+  /
+  sum by (resource_container, model_user_id) (
+    rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_count{
+      model_user_id="gemini-2.5-pro"
+    }[15m])
+  )
+) > 0.05
+
+```
+
+* **Documentation Template:**
+
+```markdown
+# 📉 General API Degradation
+**Project ID:** `${resource.labels.project_id}`
+**Model:** `${metric.labels.model_user_id}`
+
+**Details:** Overall success rate has dropped below 95% for `${resource.labels.project_id}`.
+
+**Playbook:**
+1. Open Log Explorer for this project.
+2. Filter by `severity>=ERROR` and `resource.type="aiplatform.googleapis.com/Endpoint"`.
+3. Identify the dominant error code (e.g., are we suddenly getting 403 Permission Denied?).
+
+```
+
+---
+
+### 5. GSU Capacity Burndown (90% over 30 min)
+
+**Purpose:** Monitors Provisioned Throughput (PT) health. Fires when sustained token consumption averages >90% of the hard limit for 30 consecutive minutes.
+
+* **Alert Name:** `Unified | GSU Capacity Burndown > 90% (30m) | Gemini-2.5-Pro`
+* **Condition:** `> 0.9`
+* **PromQL:**
+
+```promql
+(
+  sum by (resource_container, model_user_id) (
+    rate(aiplatform_googleapis_com:publisher_online_serving_consumed_token_throughput{
+      model_user_id="gemini-2.5-pro"
+    }[30m])
+  )
+  /
+  sum by (resource_container, model_user_id) (
+    aiplatform_googleapis_com:publisher_online_serving_dedicated_token_limit{
+      model_user_id="gemini-2.5-pro"
+    }
+  )
+) > 0.9
+
+```
+
+* **Documentation Template:**
+
+```markdown
+#  High Capacity Utilization (GSU)
+**Project ID:** `${resource.labels.project_id}`
+**Model:** `${metric.labels.model_user_id}`
+
+**Details:** `${resource.labels.project_id}` has consumed >90% of its Provisioned Throughput token limit consistently for the last 30 minutes. 
+
+**Playbook:**
+1. This is a capacity warning. No immediate outage is occurring, but we are near the ceiling.
+2. If traffic continues to grow, requests will start spilling over or being throttled.
+3. Consider routing non-critical batch jobs to off-peak hours.
+
+```
+
+---
+
+### 6. Spillover Token Ratio (>20%)
+
+**Purpose:** Monitors the economic efficiency of your setup. Fires when more than 20% of your total token throughput is being handled by the expensive Pay-As-You-Go shared pool instead of your pre-paid Dedicated pool.
+
+* **Alert Name:** `Unified | PT vs Spillover Token Ratio > 20% | Gemini-2.5-Pro`
+* **Condition:** `> 0.20`
+* **PromQL:**
+
+```promql
+(
+  sum by (resource_container, model_user_id) (
+    rate(aiplatform_googleapis_com:publisher_online_serving_consumed_token_throughput{
+      request_type="spillover", 
+      model_user_id="gemini-2.5-pro"
+    }[15m])
+  )
+  /
+  sum by (resource_container, model_user_id) (
+    rate(aiplatform_googleapis_com:publisher_online_serving_consumed_token_throughput{
+      request_type="dedicated", 
+      model_user_id="gemini-2.5-pro"
+    }[15m])
+  )
+) > 0.20
+
+```
+
+* **Documentation Template:**
+
+```markdown
+# 💸 Cost Alert: High Spillover Traffic
+**Project ID:** `${resource.labels.project_id}`
+**Model:** `${metric.labels.model_user_id}`
+
+**Details:** More than 20% of the token volume in `${resource.labels.project_id}` is spilling over into standard billing. Our Provisioned Throughput (PT) is undersized for current traffic.
+
+**Playbook:**
+1. Notify the FinOps/Billing team.
+2. Evaluate if the GSU capacity assigned to `${resource.labels.project_id}` needs to be increased.
+3. Check for inefficient prompt designs causing massive token consumption.
+
+```
+
+---
+
+## 💡 Best Practices & Expert Recommendations
+
+### 1. Variables in Notification Subject Lines
+
+While Google Cloud Alerting restricts the use of variables directly in the static `display_name` of the policy, **Incident Titles** are dynamically generated by GCP.
+When an alert fires via Email or Slack, Google will automatically append the grouping resource to the title.
+
+* *Example Email Subject:* `Incident opened for Unified | 429 Quota Throttling > 2% | Gemini-2.5-Pro on project prj-initiative-app1`
+* Because you heavily utilized `${resource.labels.project_id}` in the Markdown documentation body, the on-call engineer will immediately see the project name in bold at the top of the message payload.
+
+### 2. Handling Division by Zero (PromQL Safety)
+
+You might wonder: *"What happens to the Spillover ratio if Dedicated traffic is exactly 0?"* PromQL handles this elegantly. If the denominator evaluates to zero, PromQL drops the data point rather than throwing an infinity error. This prevents false-positive alerts during periods of zero traffic.
+
+### 3. Notification Routing Strategy
+
+Do not send all these alerts to the same channel. Use different Notification Channels based on the alert type:
+
+* **PagerDuty / Critical Slack Channel:** 5xx Errors, Total Non-200. *(Requires immediate engineer intervention).*
+* **SRE / DevOps Slack Channel:** 429 Errors, 499 Errors. *(Requires investigation into app behavior).*
+* **FinOps / Billing Email:** Spillover Ratio, GSU Burndown. *(Capacity planning and cost discussions, usually not a 3 AM emergency).*
