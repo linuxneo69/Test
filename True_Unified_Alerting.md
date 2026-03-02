@@ -275,3 +275,27 @@ Below are the 6 dynamic alerts. Notice that `model_user_id="xyz"` has been compl
 
 1. **Handling "No Data" States:** When configuring these alerts in GCP, look for the **"Evaluation missing data"** setting. Set it to `Missing data points considered as values that don't break the policy requirement`. If you don't do this, the alerts will auto-resolve incorrectly during moments of zero traffic.
 2. **Auto-Discovery:** Because we removed the model filters, if your team deploys `claude-3.5-sonnet` tomorrow in any of the 10 projects, these alerts will begin tracking it instantly with zero configuration changes required from you.
+
+
+-----------
+
+
+Updated "Elite" Documentation SectionTo implement the "variable subject line" and "auto-discovery" perfectly, use this specific configuration for your documentation and subject lines.📍 Variable Subject Line ConfigurationIn the Notification Subject Line field (available in the Alerting UI), use this exact string:[${severity}] 429 High Error in ${metric.label.resource_container} | Model: ${metric.label.model_user_id}📍 Improved PromQL (With Volume Guardrail)This version of the 429 alert prevents "noisy" alerts on low-traffic models:Code snippet# Alert only if: 
+# 1. Error rate is > 2% 
+# 2. AND we have at least 50 requests in the window (prevents small-sample noise)
+(
+  sum by (resource_container, model_user_id) (
+    rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_count{response_code="429"}[15m])
+  )
+  /
+  sum by (resource_container, model_user_id) (
+    rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_count[15m])
+  ) > 0.02
+)
+and 
+(
+  sum by (resource_container, model_user_id) (
+    increase(aiplatform_googleapis_com:publisher_online_serving_model_invocation_count[15m])
+  ) > 50
+)
+💡 Summary Checklist for "Elite" SetupFeatureStatusActionAuto-Discovery✅ ActiveNo changes needed; PromQL handles this.Dynamic Subject🛠️ Action RequiredUpdate "Notification Subject Line" with ${metric.label.resource_container}.Noise Reduction🛠️ Action RequiredAdd the and increase(...) > 50 logic to prevent low-traffic alerts.Cost Awareness✅ ActiveKeep the Spillover Ratio alert to monitor ROI of GSU.
