@@ -334,3 +334,83 @@ and
 | **Dynamic Subject** |  Action Required | Update "Notification Subject Line" with `${metric.label.resource_container}`. |
 | **Noise Reduction** |  Action Required | Add the `and increase(...) > 50` logic to prevent low-traffic alerts. |
 | **Cost Awareness** |  Active | Keep the Spillover Ratio alert to monitor ROI of GSU. |
+
+================
+
+------------------'
+
+
+
+
+
+
+
+---
+
+## 🛠️ The Implementation: Multi-Code Universal Alert
+
+### 1. The Unified PromQL Logic
+
+This query calculates the error rate for **each** error code separately. If any specific code (429, 499, 500, or 503) crosses 2% for a specific model, it triggers a unique incident for that code.
+
+```promql
+(
+  sum by (resource_container, model_user_id, response_code) (
+    rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_count{response_code=~"429|499|500|503"}[15m])
+  )
+  /
+  sum by (resource_container, model_user_id) (
+    rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_count[15m])
+  )
+) > 0.02
+
+```
+
+> **Why this works:** The `sum by` in the numerator includes `response_code`, while the denominator does not. This creates a "Ratio per Error Code" (e.g., 429s as % of total traffic).
+
+---
+
+### 2. Dynamic Subject Line Configuration
+
+In the **Notification Subject Line** field of the Alert Policy, use the following string. Google will automatically swap the variables for the actual values that triggered the alert.
+
+**Subject Line Template:**
+`[${severity}] [HTTP ${metric.label.response_code}] High Error Rate in ${metric.label.resource_container} | Model: ${metric.label.model_user_id}`
+
+* **Result Example 1:** `[CRITICAL] [HTTP 429] High Error Rate in project-123 | Model: gemini-1.5-pro`
+* **Result Example 2:** `[CRITICAL] [HTTP 503] High Error Rate in project-456 | Model: claude-3-sonnet`
+
+---
+
+### 3. Dynamic Documentation (Markdown)
+
+Use this in the **Documentation** section to give your team instant context.
+
+```markdown
+# Vertex AI Performance Alert
+**Error Code Detected:** `${metric.label.response_code}`
+**Impacted Project:** `${metric.label.resource_container}`
+**Impacted Model:** `${metric.label.model_user_id}`
+
+###  Analysis
+The error rate for `${metric.label.response_code}` has exceeded **2%** over the last 15 minutes. 
+
+### 🛠️ Quick Actions
+- **If 429:** Check Quotas for `${metric.label.model_user_id}`.
+- **If 499:** Check client-side timeouts or large prompt sizes.
+- **If 5xx:** Check the Google Cloud Service Health Dashboard.
+
+```
+
+---
+
+## Why
+
+| Feature | Single Policy (New Way) | Multiple Policies (Old Way) |
+| --- | --- | --- |
+| **Maintenance** | **1 Policy** to manage. | **4+ Policies** to manage. |
+| **Clarity** | Subject line tells you exactly *which* error occurred. | You have to read the policy name. |
+| **Scalability** | Add a new error code by just adding ` | 403` to the regex. |
+| **Auto-Discovery** | Detects new models and specific error types automatically. | Requires manual setup for each combination. |
+
+---
