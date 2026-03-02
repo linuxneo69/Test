@@ -275,5 +275,3 @@ Below are the 6 dynamic alerts. Notice that `model_user_id="xyz"` has been compl
 
 1. **Handling "No Data" States:** When configuring these alerts in GCP, look for the **"Evaluation missing data"** setting. Set it to `Missing data points considered as values that don't break the policy requirement`. If you don't do this, the alerts will auto-resolve incorrectly during moments of zero traffic.
 2. **Auto-Discovery:** Because we removed the model filters, if your team deploys `claude-3.5-sonnet` tomorrow in any of the 10 projects, these alerts will begin tracking it instantly with zero configuration changes required from you.
-
-**Would you like me to help draft a Terraform snippet for these alerts so you can deploy them as Code instead of clicking through the UI?**
