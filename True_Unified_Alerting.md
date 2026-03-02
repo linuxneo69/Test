@@ -280,7 +280,30 @@ Below are the 6 dynamic alerts. Notice that `model_user_id="xyz"` has been compl
 -----------
 
 
-Updated "Elite" Documentation SectionTo implement the "variable subject line" and "auto-discovery" perfectly, use this specific configuration for your documentation and subject lines.📍 Variable Subject Line ConfigurationIn the Notification Subject Line field (available in the Alerting UI), use this exact string:[${severity}] 429 High Error in ${metric.label.resource_container} | Model: ${metric.label.model_user_id}📍 Improved PromQL (With Volume Guardrail)This version of the 429 alert prevents "noisy" alerts on low-traffic models:Code snippet# Alert only if: 
+### 2. Multi-Condition Alerting (Reducing Fatigue)
+
+To avoid "flapping" alerts (alerts that turn on and off rapidly), you can add a volume requirement.
+
+* **The Problem:** If a project only makes 2 requests and 1 fails, that's a 50% error rate. You get a critical page at 3 AM for a single failed request.
+* **The Fix:** Add a `high_volume` check to your PromQL so it only fires if the error rate is high **AND** the total requests are > 100 per minute.
+
+---
+
+##  Updated 1.1 Documentation Section
+
+To implement the "variable subject line" and "auto-discovery" perfectly, use this specific configuration for your documentation and subject lines.
+
+###  Variable Subject Line Configuration
+
+In the **Notification Subject Line** field (available in the Alerting UI), use this exact string:
+`[${severity}] 429 High Error in ${metric.label.resource_container} | Model: ${metric.label.model_user_id}`
+
+###  Improved PromQL (With Volume Guardrail)
+
+This version of the 429 alert prevents "noisy" alerts on low-traffic models:
+
+```promql
+# Alert only if: 
 # 1. Error rate is > 2% 
 # 2. AND we have at least 50 requests in the window (prevents small-sample noise)
 (
@@ -298,4 +321,16 @@ and
     increase(aiplatform_googleapis_com:publisher_online_serving_model_invocation_count[15m])
   ) > 50
 )
-💡 Summary Checklist for "Elite" SetupFeatureStatusActionAuto-Discovery✅ ActiveNo changes needed; PromQL handles this.Dynamic Subject🛠️ Action RequiredUpdate "Notification Subject Line" with ${metric.label.resource_container}.Noise Reduction🛠️ Action RequiredAdd the and increase(...) > 50 logic to prevent low-traffic alerts.Cost Awareness✅ ActiveKeep the Spillover Ratio alert to monitor ROI of GSU.
+
+```
+
+---
+
+##  Summary Checklist for "Updated" Setup
+
+| Feature | Status | Action |
+| --- | --- | --- |
+| **Auto-Discovery** |  Active | No changes needed; PromQL handles this. |
+| **Dynamic Subject** |  Action Required | Update "Notification Subject Line" with `${metric.label.resource_container}`. |
+| **Noise Reduction** |  Action Required | Add the `and increase(...) > 50` logic to prevent low-traffic alerts. |
+| **Cost Awareness** |  Active | Keep the Spillover Ratio alert to monitor ROI of GSU. |
