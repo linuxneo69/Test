@@ -90,3 +90,74 @@ To ensure this strategic setup works flawlessly, check these specific boxes in t
 
 This setup completely eliminates the need to hardcode `project-xyz` or `claude-sonnet-4-5`. It will dynamically catch every current and future combination.
 
+==========
+
+===
+
+----
+
+
+
+
+
+
+Recommendations for your alert suite, ensuring the `${metric.label.KEY}` syntax is used correctly to avoid the `(null)` issues you encountered.
+
+---
+
+### 1. Unified Error Rate Alert (The 2% Example)
+
+This is your "Universal Catch-all" for HTTP 429, 499, and 5xx errors.
+
+| Field | Recommended Value |
+| --- | --- |
+| **Condition Name** | `Unified Vertex AI Error Rate > 2% (Auto-Discovery)` |
+| **Subject Line** | `[${severity}] [HTTP ${metric.label.response_code}] High Error in ${metric.label.resource_container} |
+| **Policy User Labels** | `alert_type: unified_error`, `strategy: auto_discovery`, `service: vertex_ai` |
+
+---
+
+### 2. GSU Burndown Alert (Quota Monitoring)
+
+This monitors how fast you are consuming your provisioned throughput (GSU).
+
+| Field | Recommended Value |
+| --- | --- |
+| **Condition Name** | `GSU Quota Burndown > 90% (Auto-Discovery)` |
+| **Subject Line** | `[${severity}] [QUOTA] GSU Burndown > 90% in ${metric.label.resource_container} |
+| **Policy User Labels** | `alert_type: quota_management`, `resource: gsu`, `threshold: 90` |
+
+---
+
+### 3. GSU Spillover Alert
+
+This detects when the ratio of consumed tokens significantly deviates from your dedicated limits, indicating traffic is "spilling over" to shared/on-demand capacity.
+
+| Field | Recommended Value |
+| --- | --- |
+| **Condition Name** | `GSU Spillover Detection (Auto-Discovery)` |
+| **Subject Line** | `[${severity}] [SPILLOVER] Critical traffic imbalance: ${metric.label.resource_container} |
+| **Policy User Labels** | `alert_type: performance_scaling`, `metric: throughput_ratio` |
+
+---
+
+### 4. Why "Policy User Labels" (Tags) are Important
+
+In your screenshot (`image_08635b.png`), you began adding `policy_type: dynamic_burndown_alert`. This is excellent SRE practice for three reasons:
+
+* **Dashboards:** You can create one dashboard that automatically pulls in all alerts tagged with `strategy: auto_discovery`.
+* **Routing:** You can tell Google Cloud to send alerts with the tag `alert_type: quota_management` to the Capacity Planning team, while `unified_error` goes to the On-Call Devs.
+* **Filtering:** When you have 10 projects and 50 models, searching for an incident by "Tag" is much faster than scrolling through a list of names.
+
+---
+
+### 🛠️ Final Implementation Checklist
+
+To prevent the `(null)` values from returning, verify these three logic points for every alert you build in this suite:
+
+1. **PromQL Preservation:** Ensure your `sum by (...)` includes `resource_container` and `model_user_id`. If you don't "sum by" them, they disappear.
+2. **Variable Accuracy:** Always use the singular `label` (e.g., `${metric.label.resource_container}`) rather than the plural `labels` or the `resource.labels` prefix.
+3. **Math Execution:** In PromQL, your division logic should look like this to maintain accuracy:
+
+$$\frac{\sum_{\text{labels}} (\text{rate}(\text{errors}))}{\sum_{\text{labels}} (\text{rate}(\text{total requests}))} > 0.02$$
+
