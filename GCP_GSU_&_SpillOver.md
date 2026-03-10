@@ -1,56 +1,62 @@
-# Vertex AI — Capacity & Error Alerting (Unified Auto-Discovery)
+# Vertex AI — Unified Alerting (Auto-Discovery)
 
-*Purpose:* single unified monitoring policy set that auto-discovers Vertex AI models across projects and alerts on Errors, GSU (token) Burndown, Spillover, and Predictive Saturation.
-
----
-
-## 📌 Overview (TL;DR)
-
-* One **auto-discovery** policy set monitors all Vertex AI models across scoped projects.
-* Alerts covered here (copy-paste PromQL included):
-
-  1. **Non-200 Error Rate** — if >10% non-200 in last 15m (guardrail: ≥1000 calls)
-  2. **GSU Burndown** — if usage >90% of dedicated token limit over 30m (guardrail: ≥10k tokens)
-  3. **Spillover** — if spillover >20% of dedicated over 15m (guardrail: ≥5k spillover tokens)
-  4. **Predictive GSU Saturation** — predict capacity exhaustion in next 10m (uses `predict_linear`)
-  5. **Predictive Spillover** — predict rising spillover (optional)
-* Each rule preserves `resource_container` and `model_user_id` in `sum by(...)` so alert templates can reference Project & Model.
+Purpose: single unified monitoring policy set that auto-discovers Vertex AI models across projects and alerts on Errors, GSU (token) Burndown, Spillover, and Predictive Saturation.
 
 ---
 
-# 1. Quick Pre-Checks (do **before** you create policies)
+## At a glance
 
-1. **Confirm label names** (exact keys) in Metrics Explorer → PromQL:
+* **Monitored scope:** Metrics Scope (monitoring hub) covering multiple projects.
+* **Goals:** early detection (predictive), capacity protection (GSU), cost/risk control (spillover), and reliability (error-rate).
+* **Key metrics used:**
+
+  * `aiplatform_googleapis_com:publisher_online_serving_model_invocation_count`
+  * `aiplatform_googleapis_com:publisher_online_serving_consumed_token_throughput`
+  * `aiplatform_googleapis_com:publisher_online_serving_dedicated_token_limit`
+* **Important labels:** `resource_container` (project), `model_user_id` (model), `response_code`, `request_type` (if present). Confirm exact names in Metrics Explorer before creating policies.
+
+---
+
+## Quick pre-check (do this first)
+
+1. Open **Monitoring → Metrics Explorer → PromQL**. Run:
 
    ```promql
    topk(20, aiplatform_googleapis_com:publisher_online_serving_consumed_token_throughput)
    topk(20, aiplatform_googleapis_com:publisher_online_serving_model_invocation_count)
    topk(20, aiplatform_googleapis_com:publisher_online_serving_dedicated_token_limit)
    ```
-
-   Inspect the series legend — note exact label keys (commonly `resource_container`, `model_user_id`, `response_code`, `request_type`). Use those exact keys everywhere.
-2. Confirm the **dedicated token limit** metric exists per model:
-
-   ```promql
-   topk(20, aiplatform_googleapis_com:publisher_online_serving_dedicated_token_limit)
-   ```
-3. Decide guardrail thresholds for your environment (see Recommendations table below).
+2. Inspect legend for exact label keys. Confirm `resource_container` and `model_user_id`. If label names differ, use the exact names in all queries and templates.
+3. Decide environment guardrails from the Recommended Thresholds table below.
 
 ---
 
-# 2. PromQL — Copy-Pasteable Alert Conditions
+## Global conventions (use consistently)
 
-> **Important usage notes**
->
-> * Paste the entire block into Cloud Monitoring (PromQL mode). Cloud Monitoring does **not** accept `name =` variable assignments — only expressions.
-> * `predict_linear` must be given a **range-vector** of the *raw metric selector* (e.g., `metric_name[30m]`). Do **not** put `[30m]` on an aggregation result (that causes `ranges only allowed for vector selectors` error).
+* **Policy naming:** `VertexAI / <Area> / <AlertType>` (e.g., `VertexAI / Capacity / Predictive GSU Saturation`)
+* **Condition naming:** `<AlertType> — <window> — <threshold>` (e.g., `Non-200 Rate — 15m — 10%`)
+* **Tag examples:** `vertexai`, `gsu`, `capacity`, `spillover`, `predictive`, `auto-discovery`, `owned-by:ml-platform`, `env:prod`
+* **Grouping:** Group incidents by `resource_container`, `model_user_id`. Configure the policy “Group incidents by” to those labels.
+* **Notification variables:** Prefer `${metric_or_resource.label.<KEY>}` in templates (falls back between metric & resource labels). Use `${metric.label.value}` or `${metric.value}` for numeric trigger value (test in your org which expands).
+* **Guardrail pattern:** Every alert includes a traffic floor such as `increase(...[window]) > X` to reduce noise.
 
 ---
 
-## 2.1 Non-200 Error Rate (Unified Error)
+# Alerts — single-expression PromQL + metadata (copy/paste)
 
-**When:** Non-200 responses > **10%** in the last **15m** AND at least **1,000** requests in 15m.
-**PromQL**
+> Paste each PromQL **as a single expression** into the Cloud Monitoring alert condition. **Do not** use assignment syntax (`name = ...`) or put `[range]` on aggregation results. `predict_linear` must be applied to a raw metric range-vector (e.g., `metric_name[30m]`).
+
+---
+
+### 1) **Non-200 Error Rate (Unified Error)** — *critical reliability alert*
+
+**Policy name:** `VertexAI / Errors / Non200 Rate`
+**Condition name:** `Non-200 Rate — 15m — >10%`
+**Severity:** `CRITICAL`
+**Tags:** `vertexai, errors, unified, auto-discovery`
+**Grouping:** `resource_container`, `model_user_id`
+
+**PromQL (paste exactly):**
 
 ```promql
 (
@@ -70,14 +76,47 @@ and
 )
 ```
 
-**Why:** denominator groups by `resource_container, model_user_id` (no `response_code`), so ratio = non-200 / all requests.
+**Subject (notification):**
+
+```
+[VertexAI][${policy.display_name}] Error Rate >10% | Project: ${metric_or_resource.label.resource_container} | Model: ${metric_or_resource.label.model_user_id}
+```
+
+**Documentation (paste into policy docs):**
+
+```markdown
+**Alert:** Non-200 Response Rate >10% over 15 minutes
+
+**Project:** ${metric_or_resource.label.resource_container}  
+**Model:** ${metric_or_resource.label.model_user_id}  
+**Observed value:** ${metric.label.value}
+
+**Why:** More than 10% of requests returned non-200 responses in the last 15 minutes.
+
+**Guardrail:** Fires only when ≥1000 calls in the last 15 minutes.
+
+**Immediate actions**
+1. Open Metrics Explorer → filter by project & model.  
+2. Inspect `publisher_online_serving_model_invocation_count` split by `response_code` and `caller`.  
+3. If single caller: throttle/block. If global: check recent deployments/configs and model health.  
+4. Escalate to model owner & Platform SRE.
+
+**Links:** Metrics Explorer (project prefilled), runbook link: <RUNBOOK_URL>
+```
+
+**Testing note:** Lower ratio to 5% and guardrail to 100 in a sandbox to force firing and validate notification variables expand.
 
 ---
 
-## 2.2 GSU Burndown (Static)
+### 2) **GSU Burndown (Static)** — *capacity urgent / pre-spill*
 
-**When:** Token throughput / dedicated limit > **90%** over **30m** AND at least **10k** tokens consumed in 30m.
-**PromQL**
+**Policy name:** `VertexAI / Capacity / GSU Burndown`
+**Condition name:** `GSU Burndown — 30m — >90%`
+**Severity:** `WARNING` (75%) / `CRITICAL` (90%) — create two conditions for tiering if desired
+**Tags:** `vertexai, gsu, capacity, burndown`
+**Grouping:** `resource_container`, `model_user_id`
+
+**PromQL:**
 
 ```promql
 (
@@ -97,14 +136,44 @@ and
 )
 ```
 
-**Why:** throughput is tokens/sec (smoothed over 30m). Compare to dedicated capacity (gauge). Guardrail prevents noisy firing on tiny workloads.
+**Subject:**
+
+```
+[VertexAI][${policy.display_name}] GSU Usage >90% | Project: ${metric_or_resource.label.resource_container} | Model: ${metric_or_resource.label.model_user_id}
+```
+
+**Documentation:**
+
+```markdown
+**Alert:** GSU Burndown — token throughput >90% of dedicated limit over 30 minutes.
+
+**Project:** ${metric_or_resource.label.resource_container}  
+**Model:** ${metric_or_resource.label.model_user_id}  
+**Observed utilization:** ${metric.label.value}
+
+**Why:** Sustained high consumption relative to dedicated capacity can cause spillover to on-demand and increase latency/cost.
+
+**Immediate actions**
+1. Inspect throughput/time-series and recent callers.  
+2. If legitimate: request increased dedicated GSU capacity.  
+3. If unexpected: identify & throttle problematic callers or move batch jobs off-peak.
+
+**Runbook:** escalate to model owner → Platform SRE for provisioning.
+```
+
+**Testing note:** Use a smaller guardrail in staging (e.g., `>1000`) to trigger and validate.
 
 ---
 
-## 2.3 Spillover (Static)
+### 3) **Spillover (Static)** — *billing & latency risk*
 
-**When:** Spillover throughput > **20%** of dedicated throughput (over 15m) AND spillover tokens > **5k** in 30m.
-**PromQL**
+**Policy name:** `VertexAI / Capacity / Spillover`
+**Condition name:** `Spillover Ratio — 15m — >20%`
+**Severity:** `WARNING`/`CRITICAL` (tune per org)
+**Tags:** `vertexai, spillover, capacity, billing`
+**Grouping:** `resource_container`, `model_user_id`
+
+**PromQL (preferred if `request_type` exists):**
 
 ```promql
 (
@@ -124,14 +193,48 @@ and
 )
 ```
 
-**Notes:** if `request_type` label is not always present in your metrics, compute spillover as `total - dedicated` *only if both metrics exist and label sets match*.
+**If `request_type` is not present:** derive spillover = `total_throughput - dedicated_throughput` only if both metrics exist and share compatible labels — validate carefully.
+
+**Subject:**
+
+```
+[VertexAI][${policy.display_name}] Spillover >20% | Project: ${metric_or_resource.label.resource_container} | Model: ${metric_or_resource.label.model_user_id}
+```
+
+**Documentation:**
+
+```markdown
+**Alert:** Spillover — spillover throughput >20% of dedicated throughput (15m).
+
+**Project:** ${metric_or_resource.label.resource_container}  
+**Model:** ${metric_or_resource.label.model_user_id}  
+**Observed spillover ratio:** ${metric.label.value}
+
+**Why:** Requests are being served from on-demand capacity (spillover) — risk of higher latency and billing.
+
+**Immediate actions**
+1. Confirm dedicated saturation and spot callers.  
+2. If necessary, increase dedicated GSU, or throttle/redirect non-critical traffic.  
+3. Notify billing/cost owner if sustained.
+
+**Runbook:** see GSU Burndown for capacity steps + billing contacts.
+```
+
+**Testing note:** Simulate controlled spillover in staging or lower guardrail to validate.
 
 ---
 
-## 2.4 Predictive GSU Saturation (Predictive)
+### 4) **Predictive GSU Saturation** — *early warning (recommended)*
 
-**When:** Current trend predicts throughput will exceed dedicated limit within **10 minutes** (600s), and consumption > **10k** tokens in 30m.
-**PromQL (WORKING pattern)**
+**Policy name:** `VertexAI / Capacity / Predictive GSU Saturation`
+**Condition name:** `Predictive Saturation — 10m projection`
+**Severity:** `WARNING` (predicted in 30m) / `CRITICAL` (predicted in 10m) — use tiered policies
+**Tags:** `vertexai, predictive, gsu, capacity`
+**Grouping:** `resource_container`, `model_user_id`
+
+**IMPORTANT:** `predict_linear` must be applied to a raw metric range-vector selector (e.g., `metric_name[30m]`). Do **not** attach `[30m]` to aggregated expressions.
+
+**PromQL (paste exact):**
 
 ```promql
 predict_linear(
@@ -148,22 +251,45 @@ and
 )
 ```
 
-**Why this form works**
+**Subject:**
 
-* `predict_linear(metric[30m],600)` accepts the raw metric range-vector, projects the per-series value 600s into the future and returns an instant vector with the same labels as the metric.
-* Compare the projected value to the dedicated limit metric (which is usually a per-model gauge). If dedicated_limit requires aggregation first, do that carefully — **do not** apply `[30m]` to an aggregation result.
+```
+[VertexAI][${policy.display_name}] Predictive GSU Saturation (10m) | Project: ${metric_or_resource.label.resource_container} | Model: ${metric_or_resource.label.model_user_id}
+```
 
-**Tuning**
+**Documentation:**
 
-* prediction window: 600s (10m) recommended; can use 300s / 900s depending on needs.
-* lookback for prediction: 30m is stable; reduce to 15m for higher sensitivity.
+```markdown
+**Alert:** Predicted throughput will exceed dedicated token limit within 10 minutes (linear projection using last 30m).
+
+**Project:** ${metric_or_resource.label.resource_container}  
+**Model:** ${metric_or_resource.label.model_user_id}  
+**Predicted throughput (10m):** ${metric.label.value}  
+**Dedicated token limit:** ${metric_or_resource.label.publisher_online_serving_dedicated_token_limit}
+
+**Why:** Predictive detection allows preemptive provisioning & throttling before spillover/errors occur.
+
+**Immediate actions**
+1. Inspect prediction & recent growth sources.  
+2. If legitimate: request/increase GSU capacity.  
+3. If unexpected: apply rate limits / block callers.
+
+**Tuning:** Change prediction window (600s) or lookback (30m) per sensitivity needs.
+```
+
+**Testing note:** In staging, use smaller lookback/prediction windows to force firing and confirm notifications.
 
 ---
 
-## 2.5 Predictive Spillover (Optional)
+### 5) **Predictive Spillover (optional proactive)**
 
-**When:** Predicted spillover will exceed **10%** of dedicated capacity in 10 minutes.
-**PromQL**
+**Policy name:** `VertexAI / Capacity / Predictive Spillover`
+**Condition name:** `Predictive Spillover — 10m — >10%`
+**Severity:** `WARNING`
+**Tags:** `vertexai, predictive, spillover`
+**Grouping:** `resource_container`, `model_user_id`
+
+**PromQL (if `request_type="spillover"` exists):**
 
 ```promql
 predict_linear(
@@ -180,175 +306,113 @@ and
 )
 ```
 
+**Doc & Runbook:** same workflow as Spillover, but act proactively.
+
 ---
 
-# 3. Notification Templates (subject + body)
+## Recommended dashboard panels (single glance)
 
-> Use `${metric_or_resource.label.<KEY>}` if you need a fallback that covers either metric or resource labels. In many environments `${metric.label.<KEY>}` works when the label survived aggregation. Validate in test alerts.
+* **Model Inventory tile:** top N models by throughput (show `resource_container` + `model_user_id`)
+* **Throughput vs Dedicated Limit:** 1m/5m/15m + dedicated limit gauge + predictive overlay (predicted value line)
+* **Spillover ratio & absolute spillover tokens**
+* **Error rate sweep:** non-200 % by model
+* **Heatmap:** % models >75% / >90% usage and predicted >100% in 10m
 
-### GSU Burndown — Subject
+---
+
+## Recommended thresholds (starter presets)
+
+|                Env | Non-200 guardrail (calls/15m) | GSU guardrail (tokens/30m) | Spillover guardrail (tokens/30m) | Predict lookback / proj |
+| -----------------: | ----------------------------: | -------------------------: | -------------------------------: | ----------------------: |
+|           Dev/Test |                            50 |                      1,000 |                              500 |                15m / 5m |
+| Staging/Small Prod |                         1,000 |                     10,000 |                            5,000 |               30m / 10m |
+|         Large Prod |                         5,000 |                     50,000 |                           25,000 |               30m / 10m |
+
+Tune thresholds over 2–4 weeks.
+
+---
+
+## Runbook — playbook (short actionable steps)
+
+**Non-200 Error**
+
+1. Open Metrics Explorer → filter by project & model.
+2. Inspect `model_invocation_count` by `response_code` and caller.
+3. If single caller: rate-limit or block. If system-wide: check recent deploys/config.
+4. Reproduce & confirm resolution. Escalate to model owner.
+
+**GSU Burndown / Predictive**
+
+1. Confirm throughput & prediction.
+2. If traffic legitimate: request GSU increase (platform provisioning).
+3. If unexpected: identify callers, throttle or re-route. Notify Cost Owner if spillover imminent.
+
+**Spillover**
+
+1. Confirm dedicated limit saturated and spillover magnitude.
+2. Evaluate immediate mitigation: throttle, deprioritize batch jobs, allocate additional capacity. Notify Billing team if sustained.
+
+---
+
+## Creation & config checklist (use when creating policy)
+
+* [ ] Verify metric names & labels in Metrics Explorer.
+* [ ] Paste PromQL expression as a single expression.
+* [ ] Set evaluation period / alignment to match query window (15m / 30m).
+* [ ] Configure grouping by `resource_container`, `model_user_id`.
+* [ ] Add tags and select appropriate notification channels (PagerDuty, Slack).
+* [ ] Configure incident auto-close & deduplication settings.
+* [ ] Test in sandbox (lower thresholds) and verify variables expand in notifications.
+
+---
+
+## Troubleshooting (bottom of page — keep for reference)
+
+**1. `parse error: unexpected '='`**
+Cause: using assignment (`name = ...`) in Cloud Monitoring.
+Fix: remove assignments; paste only the expression.
+
+**2. `ranges only allowed for vector selectors`**
+Cause: putting `[30m]` onto aggregated expression (e.g., `sum(...)[30m]`).
+Fix: apply `predict_linear` to a raw metric range-vector: `predict_linear(metric_name[30m], 600)`.
+
+**3. Notifications show `(null)` for project/model**
+Cause: the final evaluated series lost labels (dropped by aggregation or logical vector matching such as `and/or`).
+Fix:
+
+* Ensure final expression preserves labels using `sum by(resource_container, model_user_id)`;
+* When combining vectors, ensure operands preserve same labels or use explicit `on(...)`/`ignoring(...)` matching (test behavior in Cloud Monitoring — some vector matching semantics differ).
+* Test the exact PromQL in Metrics Explorer and check legend for labels.
+
+**4. “No data in timeframe” for graphs**
+Cause: metric did not emit in selected window or model had no traffic.
+Fix: expand time window or verify metric presence with `topk()`; ensure Monitoring Hub has metrics from target projects.
+
+---
+
+## References (official)
+
+* Prometheus functions — `predict_linear`: [https://prometheus.io/docs/prometheus/latest/querying/functions/](https://prometheus.io/docs/prometheus/latest/querying/functions/)
+* Cloud Monitoring — PromQL migration & examples: [https://cloud.google.com/monitoring/promql/promql-migrate](https://cloud.google.com/monitoring/promql/promql-migrate)
+* Cloud Monitoring — Alert notification variables: [https://cloud.google.com/monitoring/alerts/doc-variables](https://cloud.google.com/monitoring/alerts/doc-variables)
+
+---
+
+## Appendices
+
+### Example short email (what responders see)
+
+**Subject:** `[VertexAI][Predictive GSU Saturation (10m)] Predictive GSU Saturation (10m) | Project: ai-prod | Model: gemini-1.5-pro`
+**Body:**
 
 ```
-[VertexAI][${policy.display_name}] GSU >90% | Project: ${metric_or_resource.label.resource_container} | Model: ${metric_or_resource.label.model_user_id}
-```
+Project: ai-prod
+Model: gemini-1.5-pro
+Predicted throughput (10m): 22,050 tokens/sec
+Dedicated token limit: 20,000 tokens/sec
 
-### Predictive Saturation — Subject
-
-```
-[VertexAI][${policy.display_name}] Predictive GSU Saturation (10m) | Project: ${metric_or_resource.label.resource_container} | Model: ${metric_or_resource.label.model_user_id}
-```
-
-### Non-200 Error — Subject
-
-```
-[VertexAI][${policy.display_name}] Error Rate >10% | Project: ${metric_or_resource.label.resource_container} | Model: ${metric_or_resource.label.model_user_id}
-```
-
-### Body (common pattern)
-
-```markdown
-**Project:** ${metric_or_resource.label.resource_container}  
-**Model:** ${metric_or_resource.label.model_user_id}  
-**Metric:** ${metric.label.__name__}  
-**Observed value:** ${metric.label.value}
-
-**What:** Brief explanation of the alerted condition.
-
-**Action:** 1) Open Metrics Explorer for project/model. 2) Check throughput, errors, spillover charts. 3) Follow runbook.
-```
-
----
-
-# 4. Runbook — First Responder (playbook)
-
-**A. Non-200 Error**
-
-1. Open Metrics Explorer: filter `resource_container`, `model_user_id`.
-2. Check `publisher_online_serving_model_invocation_count` by `response_code`: verify if one caller or many.
-3. If localized to a caller: block/throttle client. If global: check model health, rollout, recent deploys.
-4. Escalate to model owner; roll back if new deployment suspected.
-
-**B. GSU Burndown / Predictive**
-
-1. Open throughput vs dedicated limit graphs (1m/5m/15m/30m).
-2. If predicted to hit capacity:
-
-   * If traffic legitimate: increase dedicated GSU (provisioning flow).
-   * If spike unexpected: identify clients; apply rate limits; move batch jobs to off-peak.
-3. Notify billing if spillover could raise costs.
-
-**C. Spillover**
-
-1. Confirm dedicated is saturated.
-2. Find which callers cause spillover. Inspect ingress logs.
-3. If unavoidable, increase GSU or re-route to alternative model.
-
-**Escalation:** Slack/Pager → Model Owner → Platform SRE → Cost Owner.
-
----
-
-# 5. Dashboard (recommended panels)
-
-Create a Vertex AI Capacity dashboard with tiles per `resource_container/model_user_id` (top N models) showing:
-
-* Current throughput (1m/5m/15m), predicted throughput overlay.
-* Dedicated token limit (gauge).
-* Spillover rate and ratio (spillover / dedicated).
-* Error rate (non-200 %) and raw counts.
-* Heatmap: % models >75%, >90% usage and predicted >100% in 10m.
-
----
-
-# 6. Threshold Recommendations (starter presets)
-
-| Environment          | Non-200 guardrail (calls/15m) | GSU guardrail (tokens/30m) | Spillover guardrail (tokens/30m) |
-| -------------------- | ----------------------------: | -------------------------: | -------------------------------: |
-| Test / Dev           |                            50 |                      1,000 |                              500 |
-| Staging / Small Prod |                         1,000 |                     10,000 |                            5,000 |
-| Large Prod           |                         5,000 |                     50,000 |                           25,000 |
-
-Tune thresholds over 2–4 weeks from observed traffic.
-
----
-
-# 7. Grouping & Noise Reduction
-
-* **Group incidents** by `resource_container` and `model_user_id` in the alert policy to avoid alert storms (one incident per model/project).
-* Keep the guardrail `increase(...)` checks to avoid firing on tiny, ephemeral spikes.
-* Consider **tiered alerts**: WARNING at 75% or predicted in 30m, CRITICAL at 90% or predicted in 10m.
-
----
-
-# 8. Troubleshooting & Common Errors (keep this section near the bottom)
-
-### Error: `parse error: unexpected '='`
-
-Cause: using `name =` assignment style in the Cloud Monitoring PromQL editor.
-Fix: remove assignments — paste only expressions (e.g., the `predict_linear(...) > ...` expression, not `throughput_15m = ...`).
-
----
-
-### Error: `parse error: ranges only allowed for vector selectors`
-
-Cause: placing a `[30m]` range on an aggregated expression (e.g., `sum(...) [30m]`) — PromQL allows range selectors **only** on raw metric selectors (or other range-vector expressions), not on instant vectors produced by aggregation.
-Fix: apply `predict_linear` to the raw metric range-vector:
-
-```promql
-predict_linear(aiplatform_googleapis_com:publisher_online_serving_consumed_token_throughput[30m], 600)
-```
-
-Do **not** write `predict_linear(sum(...)[30m], 600)`.
-
----
-
-### Variable expansion in notifications shows `(null)` for Project/Model
-
-Cause: the final evaluated series for the alert condition did **not** contain the label (the label got dropped during aggregation or by vector matching / logical operators). Common culprits:
-
-* Using `and`/`or` between vectors that have different label sets — the intersection can drop labels.
-* Aggregating with `sum` without the required label in `sum by(...)`.
-
-Fixes:
-
-1. Ensure the **final** expression that evaluates to true has `sum by(resource_container, model_user_id)` so those labels are present.
-2. If you need to combine expressions, make sure all operands preserve the same label set (e.g., use `sum by(resource_container, model_user_id, response_code)` consistently, or align with `ignoring(...) / on(...)` vector matching where supported).
-3. Test the exact PromQL in Metrics Explorer and inspect series legend to confirm labels appear.
-
----
-
-# 9. Testing Checklist (before you flip to prod)
-
-* [ ] Run `topk(...)` queries to confirm label names.
-* [ ] Create each alert in a sandbox or with lowered thresholds to force a firing incident.
-* [ ] Inspect the alert notification payload — confirm **Project** and **Model** expand (not `(null)`).
-* [ ] Verify runbook steps with an engineer (simulate the incident and follow playbook).
-* [ ] Tune guardrails for 2 weeks and adjust thresholds.
-
----
-
-# 10. References (official)
-
-* Prometheus `predict_linear` and functions: [https://prometheus.io/docs/prometheus/latest/querying/functions/](https://prometheus.io/docs/prometheus/latest/querying/functions/)
-* Cloud Monitoring PromQL migration & examples: [https://cloud.google.com/monitoring/promql/promql-migrate](https://cloud.google.com/monitoring/promql/promql-migrate)
-* Alert notification variables: [https://cloud.google.com/monitoring/alerts/doc-variables](https://cloud.google.com/monitoring/alerts/doc-variables)
-
----
-
-## Appendix — Example: full Predictive alert as one expression (copy-paste)
-
-```promql
-predict_linear(
-  aiplatform_googleapis_com:publisher_online_serving_consumed_token_throughput[30m],
-  600
-)
->
-aiplatform_googleapis_com:publisher_online_serving_dedicated_token_limit
-and
-(
-  sum by (resource_container, model_user_id) (
-    increase(aiplatform_googleapis_com:publisher_online_serving_consumed_token_throughput[30m])
-  ) > 10000
-)
+What: Prediction indicates model will exceed dedicated token limit in 10 minutes.
+Action: Consider increasing dedicated capacity or throttling non-critical callers. See runbook: <RUNBOOK_URL>
 ```
 
 ---
