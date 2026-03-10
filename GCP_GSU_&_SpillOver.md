@@ -1,6 +1,5 @@
 # Vertex AI — Capacity & Error Alerting (Unified Auto-Discovery)
 
-**Confluence-ready, copy-pasteable documentation**
 *Purpose:* single unified monitoring policy set that auto-discovers Vertex AI models across projects and alerts on Errors, GSU (token) Burndown, Spillover, and Predictive Saturation.
 
 ---
