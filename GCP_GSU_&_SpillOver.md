@@ -20,28 +20,17 @@ Predict when a model’s dedicated token capacity (GSU) will be exhausted if cur
 ## PromQL — Predictive Saturation (copy/paste)
 
 ```promql
-# 1) instant vector: current throughput (tokens/sec) averaged over 15m
-throughput_15m = 
-  sum by (resource_container, model_user_id) (
-    rate(aiplatform_googleapis_com:publisher_online_serving_consumed_token_throughput[15m])
-  )
-
-# 2) dedicated capacity (tokens/sec) — typically a gauge
-dedicated_limit =
-  sum by (resource_container, model_user_id) (
-    aiplatform_googleapis_com:publisher_online_serving_dedicated_token_limit
-  )
-
-# 3) predict_linear: project throughput forward 10 minutes (600s) using last 30m of data
-predicted_throughput_in_10m =
+(
   predict_linear(
-    throughput_15m[30m],
+    sum by (resource_container, model_user_id) (
+      rate(aiplatform_googleapis_com:publisher_online_serving_consumed_token_throughput[15m])
+    )[30m],
     600
   )
-
-# 4) Alert when predicted throughput exceeds dedicated limit AND at least some consumption has occurred
-(
-  predicted_throughput_in_10m > dedicated_limit
+)
+>
+sum by (resource_container, model_user_id) (
+  aiplatform_googleapis_com:publisher_online_serving_dedicated_token_limit
 )
 and
 (
@@ -127,13 +116,19 @@ Your original query looked like:
 ```promql
 (
   sum by (resource_container, model_user_id) (
-    rate(...{request_type="spillover"}[15m])
+    rate(aiplatform_googleapis_com:publisher_online_serving_consumed_token_throughput{request_type="spillover"}[15m])
   )
   /
   sum by (resource_container, model_user_id) (
-    rate(...{request_type="dedicated"}[15m])
+    rate(aiplatform_googleapis_com:publisher_online_serving_consumed_token_throughput{request_type="dedicated"}[15m])
   )
 ) > 0.20
+and
+(
+  sum by (resource_container, model_user_id) (
+    increase(aiplatform_googleapis_com:publisher_online_serving_consumed_token_throughput{request_type="spillover"}[30m])
+  ) > 5000
+)
 ```
 
 This is a valid approach if `request_type` exists and metrics are emitted with those labels. Below are improvements.
