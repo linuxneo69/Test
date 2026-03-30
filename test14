@@ -1,25 +1,53 @@
-Clarification on Functional ID (FID) Onboarding Process for Dev Environment
+Thank you for the suggestion.
 
-Hi AD Team,
+We tested $(labels.model_user_id) as requested, but the behavior is still not correct in our PromQL-based alert policies. In our case, this value does not resolve to the model name in the notification. Instead, it is either rendered literally in the email subject/body or does not expand as expected.
 
-I am reaching out regarding the Functional ID (FID) onboarding process for the development environment.
+A quick summary of the current behavior:
 
-Previously, we had raised a request to onboard an FID to sky in order to:
+${resource.project} now works correctly for the project name in the notification.
 
-Authenticate Swagger UI endpoints using the FID token
+${labels.model_user_id} / $(labels.model_user_id) does not resolve to the model name.
 
-Generate Vault credentials (Vault Token, Vault ID, and Vault Secret)
+The model field still appears as null in some alerts, and in other cases the variable is printed as-is in the email subject/body.
 
-However, our request was rejected, and it was confirmed that the FID onboarding process for Dev/UAT environments has been deprecated.
+What we have verified:
 
-As we are planning to use an FID for our application workflows, we would like to check:
+In Metrics Explorer, the PromQL query results do include model_user_id.
 
-Is there an alternative process available to onboard an FID for the development environment?
+The issue is only in alert notification variable expansion.
 
-Are there any workarounds or updated guidelines to enable FID integration with sky for Dev/UAT?
+We have already tried multiple variable formats, including:
 
-If onboarding is no longer supported, what would be the recommended approach for applications requiring FID-based authentication in Dev?
+${metric.label.model_user_id}
 
-Your guidance on the current process or available alternatives would be greatly appreciated, as this is a critical dependency for our development and testing activities.
+${labels.model_user_id}
 
-Thanks in advance for your support.
+$(labels.model_user_id)
+
+${metric_or_resource.label.model_user_id}
+
+None of these have successfully expanded the model name in the alert notification.
+
+Current status:
+
+Burndown alert is working for the project name using ${resource.project}.
+
+Other PromQL alerts such as PT Spillover, HTTP error code alerts, Non-200 alerts, and predictive alerts still do not resolve the model name correctly.
+
+Could you please help confirm one of the following:
+
+Whether model_user_id is expected to be accessible through a different variable namespace for PromQL alert policies.
+
+Whether there is a known limitation or bug affecting model_user_id expansion in alert notifications.
+
+Whether there is a supported workaround to reliably show the model name in the subject and documentation sections.
+
+Screenshots attached:
+
+[Screenshot 1: Email showing $(labels.model_user_id) rendered literally in subject/body]
+
+[Screenshot 2: Metrics Explorer output showing model_user_id present in the query result]
+
+[Screenshot 3: Working alert showing ${resource.project} resolves correctly]
+
+We would appreciate any guidance you can provide so we can finalize a stable alert format for Vertex AI monitoring.
