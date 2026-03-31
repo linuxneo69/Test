@@ -51,3 +51,7 @@ Screenshots attached:
 [Screenshot 3: Working alert showing ${resource.project} resolves correctly]
 
 We would appreciate any guidance you can provide so we can finalize a stable alert format for Vertex AI monitoring.
+---
+
+
+Quick update: we’re still working through the Vertex AI alert label issue with Google support, but we do not have a final fix yet. The main problem remains that the model label is not expanding correctly in some PromQL-based alert notifications, even though the metric output shows the label in Metrics Explorer. I have been coordinating with my colleague xyz, who has access to the support case, and I’ve asked them to arrange another call with Google support so we can push for a quicker resolution. I will share the next update as soon as we get feedback from Google.
