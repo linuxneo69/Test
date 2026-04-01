@@ -1,11 +1,11 @@
 # Repository Overview
 
-This repository contains a collection of resources and scripts for managing and automating tasks in various Linux environments. It is structured into several directories, each focusing on a specific area of scripting and operation.
+This repository contains a collection of resources and scripts, configurations, howtos for managing and automating tasks in various Cloud based environments. It is structured into several directories, each focusing on a specific area of operation.
 
 ## Directory Structure
 
-- **scripts/**: Contains Bash and Python scripts designed for automation tasks. This includes setup scripts, maintenance scripts, and utility functions.
-  - `setup.sh`: Script to set up the environment.
+- **scripts/**: Contains Bash and Python scripts designed for automation tasks. This includes setup scripts, configurations, maintenance scripts, Guides and utility functions.
+  - `setup.sh`: Script to setup the environment.
   - `backup.py`: Python script for automating backups.
 
 - **docs/**: Documentation files providing usage guides and API documentation for the scripts.
