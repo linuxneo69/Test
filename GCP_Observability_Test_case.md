@@ -225,3 +225,32 @@ A few improvements were made to make the plan easier to execute and review:
 
 This test plan validates that the unified observability setup provides accurate and reliable monitoring across the onboarded applications. It ensures that the transition from traditional project-based monitoring to unified scope-based monitoring does not reduce visibility, observability quality, or operational readiness.
 
+--------
+
+
+## 2. Pre-requisites
+
+Before executing the test scenarios, ensure the following conditions are met:
+
+### 2.1 Data Availability
+
+- Application metrics must be actively generated and visible in **Metrics Explorer**.
+- Application logs must be ingested and queryable in **Logs Explorer**.
+- Data should be available for a recent time window (last 15–30 minutes minimum).
+
+### 2.2 Observability Scope Configuration
+
+- Unified observability scope is correctly configured.
+- All intended projects (Unified Project 1 and Unified Project 2) are added to the scope.
+- No unintended projects are included.
+
+### 2.3 Test Data / Trigger Readiness
+
+- Ability to generate test traffic or simulate conditions (for alert validation).
+- Known baseline behavior of the application (normal vs abnormal conditions).
+
+### 2.4 Time Synchronization
+
+- Ensure all systems (application, logs, monitoring) are aligned in time zone and timestamps.
+- Helps in accurate correlation between metrics, logs, and alerts.
+
