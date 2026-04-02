@@ -254,3 +254,8 @@ Before executing the test scenarios, ensure the following conditions are met:
 - Ensure all systems (application, logs, monitoring) are aligned in time zone and timestamps.
 - Helps in accurate correlation between metrics, logs, and alerts.
 
+------
+
+We had a call with Google support regarding the label expansion issue. For project, resource.project works reliably. We also tested resource.model_user_id, and it now works for error codes, non-200, and spillover alerts. However, it still returns null in the Burndown alert, while there, metric.label.model_user_id works. Google confirmed that these metrics (consumed token throughput, model invocation count) are still in beta, which explains the inconsistency. They said stable versions should be available in 1–2 months. For now, we will keep these alerts in UAT and watch for stable releases. I’ll attach screenshots from our email showing the model/project behavior (when it worked and when it didn’t). We’ll monitor Google’s release updates and revisit production deployment after stable versions roll out. Let me know if you need further details!
+
+[Attach screenshots showing before/after behavior]
