@@ -1,16 +1,24 @@
 ````markdown
-# Vertex AI Latency Alert Policies
+# Vertex AI Latency Alert Policies (UAT / Beta Metrics)
 
 ## Overview
 
-This document defines the latency alert policies for Vertex AI serving. The alerts are based on Google Cloud Monitoring metrics that are currently marked **BETA**, so they should be validated in UAT before production rollout. The goal is to detect sustained degradation in first-token response time and full model invocation latency. :contentReference[oaicite:1]{index=1}
+This document defines the alert policies for monitoring Vertex AI serving latency in Google Cloud Monitoring.
+
+These alerts are intended to detect sustained degradation in:
+- **First token latency**
+- **Model invocation latency**
+
+The metrics used for these policies are currently marked **BETA** in Google Cloud documentation, so these alerts should be validated in UAT or a non-production environment before rollout to production.
+
+---
 
 ## Validation Notes
 
-- These metrics are in **BETA** in the official Google Cloud metric catalog. :contentReference[oaicite:2]{index=2}
-- Use the exact label keys returned by **Metrics Explorer** in your environment.
-- For notifications, prefer `${resource.project}` for project context.
-- Include `model_user_id` only if your query output and alert notifications consistently expose it in your environment.
+- Use the exact series and label names returned by **Metrics Explorer** in your environment.
+- Prefer `${resource.project}` for project context.
+- Use `${resource.model_user_id}` for model context if it resolves correctly in alert notifications.
+- The public metric catalog documents labels such as `request_type`, `explicit_caching`, and `latency_type`. Validate `model_user_id` in your environment before relying on it in production notifications.
 
 ---
 
@@ -18,42 +26,38 @@ This document defines the latency alert policies for Vertex AI serving. The aler
 
 ## Purpose
 
-Detect slow time-to-first-token behavior for Vertex AI model responses.
+Detect delays in the time taken to return the **first token** of a Vertex AI response.
 
 ## Official Metric
 
 - Metric family: `aiplatform.googleapis.com/PublisherModel`
 - Metric type: `publisher/online_serving/first_token_latencies`
-- Unit: milliseconds
 - Metric kind: `DELTA`
 - Value type: `DISTRIBUTION`
-- Status: `BETA` :contentReference[oaicite:3]{index=3}
+- Unit: `ms`
 
-## Documented Labels
+## Important Labels
 
-The official catalog lists labels such as:
-- `input_token_size`
-- `output_token_size`
-- `max_token_size`
+Use the labels visible in your environment, typically:
 - `request_type`
-- `explicit_caching` :contentReference[oaicite:4]{index=4}
+- `explicit_caching`
+- `resource_container`
+- `model_user_id` (if exposed in your alert payload)
 
-## Policy Design
+## Alert Thresholds
 
-Create one policy with two conditions:
-
-- **Warning:** p95 > 30,000 ms over 30 minutes
-- **Critical:** p99 > 180,000 ms over 30 minutes
+| Severity | Condition | Window |
+|---|---|---|
+| Warning | p95 > 30,000 ms | 30 minutes |
+| Critical | p99 > 180,000 ms | 30 minutes |
 
 ## PromQL
-
-> Adjust the `sum by(...)` labels to match the exact labels you see in Metrics Explorer.
 
 ### p95
 ```promql
 histogram_quantile(
   0.95,
-  sum by (le, resource_container, request_type, explicit_caching) (
+  sum by (le, resource_container, model_user_id, request_type, explicit_caching) (
     rate(aiplatform_googleapis_com:publisher_online_serving_first_token_latencies_bucket[30m])
   )
 ) > 30000
@@ -64,17 +68,17 @@ histogram_quantile(
 ```promql
 histogram_quantile(
   0.99,
-  sum by (le, resource_container, request_type, explicit_caching) (
+  sum by (le, resource_container, model_user_id, request_type, explicit_caching) (
     rate(aiplatform_googleapis_com:publisher_online_serving_first_token_latencies_bucket[30m])
   )
 ) > 180000
 ```
 
-## Suggested Policy Name
+## Policy Name
 
 `VertexAI / Latency / First Token`
 
-## Suggested Condition Names
+## Condition Names
 
 * `First Token Latency - p95 - 30m`
 * `First Token Latency - p99 - 30m`
@@ -84,19 +88,13 @@ histogram_quantile(
 * `vertexai`
 * `latency`
 * `first-token`
-* `uat`
 * `performance`
+* `uat`
 
 ## Subject Line
 
 ```text
-[VertexAI][Latency] First Token Delay | Project: ${resource.project} | Request Type: ${metric.label.request_type}
-```
-
-If `model_user_id` is consistently available in your environment, you can append it as:
-
-```text
-| Model: ${metric.label.model_user_id}
+[VertexAI][Latency] First Token Delay | Project: ${resource.project} | Model: ${resource.model_user_id}
 ```
 
 ## Documentation Body
@@ -104,20 +102,21 @@ If `model_user_id` is consistently available in your environment, you can append
 ```markdown
 **Alert:** First token latency exceeded threshold.
 
-**Project:** ${resource.project}
-**Request Type:** ${metric.label.request_type}
+**Project:** ${resource.project}  
+**Model:** ${resource.model_user_id}  
+**Request Type:** ${metric.label.request_type}  
 **Observed Value:** ${metric.label.value}
 
 **Impact**
 - Slow response start time
-- Reduced user experience
-- Potential timeout risk
+- Reduced streaming experience
+- Higher timeout risk
 
 **Immediate Actions**
 1. Check recent traffic and request spikes.
 2. Review GSU utilization and spillover.
 3. Compare the behavior across projects and models.
-4. Validate whether the issue is isolated to a specific request type.
+4. Confirm whether the issue is isolated to a specific request type.
 ```
 
 ---
@@ -126,45 +125,41 @@ If `model_user_id` is consistently available in your environment, you can append
 
 ## Purpose
 
-Detect end-to-end model invocation latency degradation for Vertex AI model responses.
+Detect delays in the **end-to-end model invocation** response time.
 
 ## Official Metric
 
 * Metric family: `aiplatform.googleapis.com/PublisherModel`
 * Metric type: `publisher/online_serving/model_invocation_latencies`
-* Unit: milliseconds
 * Metric kind: `DELTA`
 * Value type: `DISTRIBUTION`
-* Status: `BETA` ([Google Cloud Documentation][1])
+* Unit: `ms`
 
-## Documented Labels
+## Important Labels
 
-The official catalog lists labels such as:
+Use the labels visible in your environment, typically:
 
-* `input_token_size`
-* `output_token_size`
-* `max_token_size`
-* `latency_type`
 * `request_type`
-* `explicit_caching` ([Google Cloud Documentation][1])
+* `latency_type`
+* `explicit_caching`
+* `resource_container`
+* `model_user_id` (if exposed in your alert payload)
 
-## Policy Design
+## Alert Thresholds
 
-Create one policy with two conditions:
-
-* **Warning:** p95 > 15,000 ms over 30 minutes
-* **Critical:** p99 > 42,000 ms over 30 minutes
+| Severity | Condition       | Window     |
+| -------- | --------------- | ---------- |
+| Warning  | p95 > 15,000 ms | 30 minutes |
+| Critical | p99 > 42,000 ms | 30 minutes |
 
 ## PromQL
-
-> Adjust the labels in `sum by(...)` to match your Metrics Explorer output.
 
 ### p95
 
 ```promql
 histogram_quantile(
   0.95,
-  sum by (le, resource_container, request_type, latency_type, explicit_caching) (
+  sum by (le, resource_container, model_user_id, request_type, latency_type, explicit_caching) (
     rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_latencies_bucket[30m])
   )
 ) > 15000
@@ -175,17 +170,17 @@ histogram_quantile(
 ```promql
 histogram_quantile(
   0.99,
-  sum by (le, resource_container, request_type, latency_type, explicit_caching) (
+  sum by (le, resource_container, model_user_id, request_type, latency_type, explicit_caching) (
     rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_latencies_bucket[30m])
   )
 ) > 42000
 ```
 
-## Suggested Policy Name
+## Policy Name
 
 `VertexAI / Latency / Model Invocation`
 
-## Suggested Condition Names
+## Condition Names
 
 * `Model Invocation Latency - p95 - 30m`
 * `Model Invocation Latency - p99 - 30m`
@@ -195,19 +190,13 @@ histogram_quantile(
 * `vertexai`
 * `latency`
 * `invocation`
-* `uat`
 * `performance`
+* `uat`
 
 ## Subject Line
 
 ```text
-[VertexAI][Latency] Invocation Delay | Project: ${resource.project} | Request Type: ${metric.label.request_type}
-```
-
-If `model_user_id` is stable in your environment, you may add:
-
-```text
-| Model: ${metric.label.model_user_id}
+[VertexAI][Latency] Invocation Delay | Project: ${resource.project} | Model: ${resource.model_user_id}
 ```
 
 ## Documentation Body
@@ -215,44 +204,60 @@ If `model_user_id` is stable in your environment, you may add:
 ```markdown
 **Alert:** Model invocation latency exceeded threshold.
 
-**Project:** ${resource.project}
-**Request Type:** ${metric.label.request_type}
-**Latency Type:** ${metric.label.latency_type}
+**Project:** ${resource.project}  
+**Model:** ${resource.model_user_id}  
+**Request Type:** ${metric.label.request_type}  
+**Latency Type:** ${metric.label.latency_type}  
 **Observed Value:** ${metric.label.value}
 
 **Impact**
 - Slow end-to-end response time
-- Higher timeout risk
+- Increased timeout risk
 - Potential backend saturation
 
 **Immediate Actions**
 1. Check traffic volume and recent spikes.
 2. Compare latency with error-rate and spillover alerts.
-3. Review whether the issue is model-specific or broad.
-4. Validate any recent deployment or configuration changes.
+3. Review whether the slowdown is model-specific or broad.
+4. Validate recent deployment or configuration changes.
 ```
 
 ---
 
 # Implementation Notes
 
-1. Validate both metrics in **Metrics Explorer** first.
-2. Confirm the exact `_bucket` series name in your environment before creating the alert.
-3. Keep these policies in **UAT/testing** until the BETA metrics stabilize. ([Google Cloud Documentation][1])
-4. Use `${resource.project}` in notifications for the most reliable project context.
-5. Only include model labels if they consistently resolve in your environment.
+1. Validate both metric series in **Metrics Explorer** before creating alert policies.
+2. Confirm the exact `_bucket` series names in your environment.
+3. Keep these policies in **UAT/testing** until the BETA metrics behave consistently.
+4. Use `${resource.project}` in notification templates for stable project context.
+5. Only rely on `${resource.model_user_id}` if your alert notifications consistently expand it.
 
 ---
 
-# Review Summary
+# Testing Checklist
 
-This version is more correct than the earlier draft because:
+* [ ] Metrics appear in Metrics Explorer.
+* [ ] Bucket series names are correct.
+* [ ] p95 and p99 queries return expected values.
+* [ ] Alert notification expands project correctly.
+* [ ] Alert notification expands model correctly.
+* [ ] Alert fires only when the threshold is sustained over 30 minutes.
+* [ ] Alert clears after the latency normalizes.
 
-* it uses the official metric names from Google’s catalog,
-* it clearly marks the metrics as BETA,
-* it avoids assuming `model_user_id` is an official catalog label,
-* and it keeps the query structure flexible so you can align it to the labels actually returned by Metrics Explorer. ([Google Cloud Documentation][1])
+---
+
+# Notes for Production Readiness
+
+These latency policies should be treated as **observability validation alerts** until the underlying BETA metrics stabilize. The recommended path is:
+
+1. Test in UAT
+2. Confirm label behavior in alert notifications
+3. Verify thresholds with real traffic
+4. Promote only after the behavior is stable across projects and models
 
 ```
+
+Review note: the public Google Cloud metric catalog confirms the two latency metrics are BETA and documents the labels shown above, but it does not publicly list `model_user_id`, so the model field should be validated in your alert payload before you rely on it as a hard production dependency. :contentReference[oaicite:1]{index=1}
+
 
 [1]: https://docs.cloud.google.com/monitoring/api/metrics_gcp_a_b "Google Cloud metrics: A through B  |  Cloud Monitoring  |  Google Cloud Documentation"
