@@ -1,74 +1,108 @@
+````markdown
 # Vertex AI Latency Alert Policies
 
 ## Overview
 
-These alert policies monitor Vertex AI serving latency for foundation-model traffic in Cloud Monitoring. The metrics used here are still marked **BETA** in Google’s metric catalog, so the policies should first be validated in UAT or a non-production environment before wider rollout. ([Google Cloud Documentation][1])
+This document defines the latency alert policies for Vertex AI serving. The alerts are based on Google Cloud Monitoring metrics that are currently marked **BETA**, so they should be validated in UAT before production rollout. The goal is to detect sustained degradation in first-token response time and full model invocation latency. :contentReference[oaicite:1]{index=1}
 
-## 1. First Token Latency
+## Validation Notes
 
-### Purpose
+- These metrics are in **BETA** in the official Google Cloud metric catalog. :contentReference[oaicite:2]{index=2}
+- Use the exact label keys returned by **Metrics Explorer** in your environment.
+- For notifications, prefer `${resource.project}` for project context.
+- Include `model_user_id` only if your query output and alert notifications consistently expose it in your environment.
 
-Detect delays in the time taken to return the first token in streaming or token-based generation flows. Google’s metric catalog names this signal **First token latencies** and marks it **BETA**. ([Google Cloud Documentation][1])
+---
 
-### Official metric
+# 1. First Token Latency Alert
 
-* `aiplatform.googleapis.com/PublisherModel`
-* `publisher/online_serving/first_token_latencies` ([Google Cloud Documentation][1])
+## Purpose
 
-### Suggested alert conditions
+Detect slow time-to-first-token behavior for Vertex AI model responses.
 
-* **Warning:** p95 > 2s
-* **Critical:** p99 > 3s
+## Official Metric
 
-### PromQL examples
+- Metric family: `aiplatform.googleapis.com/PublisherModel`
+- Metric type: `publisher/online_serving/first_token_latencies`
+- Unit: milliseconds
+- Metric kind: `DELTA`
+- Value type: `DISTRIBUTION`
+- Status: `BETA` :contentReference[oaicite:3]{index=3}
 
-Use the exact bucket series name exposed by your environment in Metrics Explorer.
+## Documented Labels
 
+The official catalog lists labels such as:
+- `input_token_size`
+- `output_token_size`
+- `max_token_size`
+- `request_type`
+- `explicit_caching` :contentReference[oaicite:4]{index=4}
+
+## Policy Design
+
+Create one policy with two conditions:
+
+- **Warning:** p95 > 30,000 ms over 30 minutes
+- **Critical:** p99 > 180,000 ms over 30 minutes
+
+## PromQL
+
+> Adjust the `sum by(...)` labels to match the exact labels you see in Metrics Explorer.
+
+### p95
 ```promql
 histogram_quantile(
   0.95,
   sum by (le, resource_container, request_type, explicit_caching) (
-    rate(aiplatform_googleapis_com:publisher_online_serving_first_token_latencies_bucket[5m])
+    rate(aiplatform_googleapis_com:publisher_online_serving_first_token_latencies_bucket[30m])
   )
-) > 2000
-```
+) > 30000
+````
+
+### p99
 
 ```promql
 histogram_quantile(
   0.99,
   sum by (le, resource_container, request_type, explicit_caching) (
-    rate(aiplatform_googleapis_com:publisher_online_serving_first_token_latencies_bucket[5m])
+    rate(aiplatform_googleapis_com:publisher_online_serving_first_token_latencies_bucket[30m])
   )
-) > 3000
+) > 180000
 ```
 
-### Policy name
+## Suggested Policy Name
 
-* `VertexAI / Latency / First Token`
+`VertexAI / Latency / First Token`
 
-### Condition name
+## Suggested Condition Names
 
-* `First Token Latency — p95`
-* `First Token Latency — p99`
+* `First Token Latency - p95 - 30m`
+* `First Token Latency - p99 - 30m`
 
-### Tags
+## Suggested Tags
 
 * `vertexai`
 * `latency`
 * `first-token`
-* `prompt-response`
 * `uat`
+* `performance`
 
-### Subject line
+## Subject Line
 
 ```text
-[VertexAI][Latency] First Token Latency High | Project: ${resource.project} | Request Type: ${metric.label.request_type}
+[VertexAI][Latency] First Token Delay | Project: ${resource.project} | Request Type: ${metric.label.request_type}
 ```
 
-### Documentation
+If `model_user_id` is consistently available in your environment, you can append it as:
+
+```text
+| Model: ${metric.label.model_user_id}
+```
+
+## Documentation Body
 
 ```markdown
-**Alert:** First token latency is above threshold.
+**Alert:** First token latency exceeded threshold.
 
 **Project:** ${resource.project}
 **Request Type:** ${metric.label.request_type}
@@ -76,83 +110,110 @@ histogram_quantile(
 
 **Impact**
 - Slow response start time
-- Poor streaming experience
-- Increased chance of timeout or user drop-off
+- Reduced user experience
+- Potential timeout risk
 
-**Immediate actions**
-1. Check recent traffic spikes.
-2. Review GSU and spillover conditions.
-3. Compare latency across models and environments.
+**Immediate Actions**
+1. Check recent traffic and request spikes.
+2. Review GSU utilization and spillover.
+3. Compare the behavior across projects and models.
 4. Validate whether the issue is isolated to a specific request type.
 ```
 
 ---
 
-## 2. Model Invocation Latency
+# 2. Model Invocation Latency Alert
 
-### Purpose
+## Purpose
 
-Detect end-to-end model invocation latency for Vertex AI serving traffic. Google’s metric catalog names this signal **Model invocation latencies** and marks it **BETA**. ([Google Cloud Documentation][1])
+Detect end-to-end model invocation latency degradation for Vertex AI model responses.
 
-### Official metric
+## Official Metric
 
-* `aiplatform.googleapis.com/PublisherModel`
-* `publisher/online_serving/model_invocation_latencies` ([Google Cloud Documentation][1])
+* Metric family: `aiplatform.googleapis.com/PublisherModel`
+* Metric type: `publisher/online_serving/model_invocation_latencies`
+* Unit: milliseconds
+* Metric kind: `DELTA`
+* Value type: `DISTRIBUTION`
+* Status: `BETA` ([Google Cloud Documentation][1])
 
-### Suggested alert conditions
+## Documented Labels
 
-* **Warning:** p95 > 3s
-* **Critical:** p99 > 5s
+The official catalog lists labels such as:
 
-### PromQL examples
+* `input_token_size`
+* `output_token_size`
+* `max_token_size`
+* `latency_type`
+* `request_type`
+* `explicit_caching` ([Google Cloud Documentation][1])
 
-Again, verify the exact bucket series name in Metrics Explorer before finalizing.
+## Policy Design
+
+Create one policy with two conditions:
+
+* **Warning:** p95 > 15,000 ms over 30 minutes
+* **Critical:** p99 > 42,000 ms over 30 minutes
+
+## PromQL
+
+> Adjust the labels in `sum by(...)` to match your Metrics Explorer output.
+
+### p95
 
 ```promql
 histogram_quantile(
   0.95,
   sum by (le, resource_container, request_type, latency_type, explicit_caching) (
-    rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_latencies_bucket[5m])
+    rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_latencies_bucket[30m])
   )
-) > 3000
+) > 15000
 ```
+
+### p99
 
 ```promql
 histogram_quantile(
   0.99,
   sum by (le, resource_container, request_type, latency_type, explicit_caching) (
-    rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_latencies_bucket[5m])
+    rate(aiplatform_googleapis_com:publisher_online_serving_model_invocation_latencies_bucket[30m])
   )
-) > 5000
+) > 42000
 ```
 
-### Policy name
+## Suggested Policy Name
 
-* `VertexAI / Latency / Model Invocation`
+`VertexAI / Latency / Model Invocation`
 
-### Condition name
+## Suggested Condition Names
 
-* `Model Invocation Latency — p95`
-* `Model Invocation Latency — p99`
+* `Model Invocation Latency - p95 - 30m`
+* `Model Invocation Latency - p99 - 30m`
 
-### Tags
+## Suggested Tags
 
 * `vertexai`
 * `latency`
 * `invocation`
-* `performance`
 * `uat`
+* `performance`
 
-### Subject line
+## Subject Line
 
 ```text
-[VertexAI][Latency] Model Invocation Latency High | Project: ${resource.project} | Request Type: ${metric.label.request_type}
+[VertexAI][Latency] Invocation Delay | Project: ${resource.project} | Request Type: ${metric.label.request_type}
 ```
 
-### Documentation
+If `model_user_id` is stable in your environment, you may add:
+
+```text
+| Model: ${metric.label.model_user_id}
+```
+
+## Documentation Body
 
 ```markdown
-**Alert:** Model invocation latency is above threshold.
+**Alert:** Model invocation latency exceeded threshold.
 
 **Project:** ${resource.project}
 **Request Type:** ${metric.label.request_type}
@@ -160,27 +221,38 @@ histogram_quantile(
 **Observed Value:** ${metric.label.value}
 
 **Impact**
-- Slow end-to-end responses
+- Slow end-to-end response time
 - Higher timeout risk
-- Potential saturation or capacity pressure
+- Potential backend saturation
 
-**Immediate actions**
+**Immediate Actions**
 1. Check traffic volume and recent spikes.
-2. Review GSU burndown and spillover alerts.
-3. Validate whether the slowdown is model-specific or shared across models.
-4. Confirm whether explicit caching is affecting the observed latency.
+2. Compare latency with error-rate and spillover alerts.
+3. Review whether the issue is model-specific or broad.
+4. Validate any recent deployment or configuration changes.
 ```
 
 ---
 
-## Correctness review and improvements
+# Implementation Notes
 
-1. The earlier wording “token latency” is better written as **first token latency**, because that is the official metric name Google uses in the catalog. ([Google Cloud Documentation][1])
+1. Validate both metrics in **Metrics Explorer** first.
+2. Confirm the exact `_bucket` series name in your environment before creating the alert.
+3. Keep these policies in **UAT/testing** until the BETA metrics stabilize. ([Google Cloud Documentation][1])
+4. Use `${resource.project}` in notifications for the most reliable project context.
+5. Only include model labels if they consistently resolve in your environment.
 
-2. These metrics are **BETA**, so keeping them in UAT/testing first is the safer choice. ([Google Cloud Documentation][1])
+---
 
-3. The official descriptors for these metrics show labels like `request_type`, `explicit_caching`, `accounting_resource`, `latency_type`, and token-size dimensions. I would **not** hardcode `model_user_id` into the document unless Metrics Explorer confirms that label exists in your exported series. ([Google Cloud Documentation][1])
+# Review Summary
 
-4. For the PromQL queries, the exact `_bucket` series name should be verified in **Metrics Explorer** before rollout, because the Cloud Monitoring catalog lists the metric types, while the PromQL-exported series name is best confirmed in your environment.
+This version is more correct than the earlier draft because:
+
+* it uses the official metric names from Google’s catalog,
+* it clearly marks the metrics as BETA,
+* it avoids assuming `model_user_id` is an official catalog label,
+* and it keeps the query structure flexible so you can align it to the labels actually returned by Metrics Explorer. ([Google Cloud Documentation][1])
+
+```
 
 [1]: https://docs.cloud.google.com/monitoring/api/metrics_gcp_a_b "Google Cloud metrics: A through B  |  Cloud Monitoring  |  Google Cloud Documentation"
