@@ -17,7 +17,7 @@ The metrics used for these policies are currently marked **BETA** in Google Clou
 
 - Use the exact series and label names returned by **Metrics Explorer** in your environment.
 - Prefer `${resource.project}` for project context.
-- Use `${resource.model_user_id}` for model context if it resolves correctly in alert notifications.
+- Use `${resource.label.model_user_id}` for model context if it resolves correctly in alert notifications.
 - The public metric catalog documents labels such as `request_type`, `explicit_caching`, and `latency_type`. Validate `model_user_id` in your environment before relying on it in production notifications.
 
 ---
@@ -196,7 +196,7 @@ histogram_quantile(
 ## Subject Line
 
 ```text
-[VertexAI][Latency] Invocation Delay | Project: ${resource.project} | Model: ${resource.model_user_id}
+[VertexAI][Latency] Invocation Delay | Project: ${resource.project} | Model: ${resource.label.model_user_id}
 ```
 
 ## Documentation Body
@@ -205,7 +205,7 @@ histogram_quantile(
 **Alert:** Model invocation latency exceeded threshold.
 
 **Project:** ${resource.project}  
-**Model:** ${resource.model_user_id}  
+**Model:** ${resource.label.model_user_id}  
 **Request Type:** ${metric.label.request_type}  
 **Latency Type:** ${metric.label.latency_type}  
 **Observed Value:** ${metric.label.value}
@@ -230,7 +230,7 @@ histogram_quantile(
 2. Confirm the exact `_bucket` series names in your environment.
 3. Keep these policies in **UAT/testing** until the BETA metrics behave consistently.
 4. Use `${resource.project}` in notification templates for stable project context.
-5. Only rely on `${resource.model_user_id}` if your alert notifications consistently expand it.
+5. Only rely on `${resource.label.model_user_id}` if your alert notifications consistently expand it.
 
 ---
 
