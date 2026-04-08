@@ -34,6 +34,13 @@ These are different dimensions and should not be mixed up:
   * `spillover`
 * latency labels describe which latency slice you are measuring.
 
+### Latency type values
+
+For Vertex AI latency metrics, `latency_type` identifies which part of the request is being measured.
+
+- `model` = time spent in the model execution itself
+- `total` = full end-to-end latency seen by the user
+
 For Vertex AI Provisioned Throughput, Google documents `dedicated`, `shared`, and spillover behavior, and notes that spillover can be processed as pay-as-you-go after the PT quota is exceeded. ([Google Cloud Documentation][2])
 
 ### 1.5 Dedicated / Shared / Spillover
