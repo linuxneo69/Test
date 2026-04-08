@@ -658,8 +658,6 @@ Treat the latency families as BETA and validate the exact label values in Metric
 * Troubleshoot alerting policies. ([Google Cloud Documentation][3])
 * Incidents for metric-based alerting policies. ([Google Cloud Documentation][4])
 
-If you want, I can now turn this into a **final clean version with shorter wording and stronger Confluence formatting**, or I can add **exact PromQL example queries under each policy**.
-
 [1]: https://docs.cloud.google.com/monitoring/api/metrics_gcp_a_b "Google Cloud metrics: A through B  |  Cloud Monitoring  |  Google Cloud Documentation"
 [2]: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/provisioned-throughput/use-provisioned-throughput?utm_source=chatgpt.com "Use Provisioned Throughput | Generative AI on Vertex AI"
 [3]: https://docs.cloud.google.com/monitoring/alerts/troubleshooting-alerts?utm_source=chatgpt.com "Troubleshoot alerting policies | Cloud Monitoring"
