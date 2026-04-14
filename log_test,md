@@ -1,222 +1,389 @@
+# Vertex AI Model Garden — Logs Explorer Validation Guide
 
-Below are **10 high-value Logs Explorer queries** to validate:
+## 1. Objective
 
-* ✅ Project-level visibility
-* ✅ Model-level visibility
-* ✅ Unified scope (GCO project seeing other projects)
-* ✅ Traffic, errors, latency, and label presence
-
-I’ll keep them **practical + directly usable in Logs Explorer (LQL)**.
+Validate that **Vertex AI Model Garden / PublisherModel traffic** can be observed in **Logs Explorer** through the deployed **Vertex AI Endpoint** resource, and that the logs are useful for debugging, correlation, and operational validation. This guide is designed for **low-traffic environments** and assumes you may only have a few requests to test with. Google’s docs confirm that online inference logs can be enabled at the endpoint level, access logs include timestamp and latency, and request-response logging is stored in BigQuery rather than Logs Explorer. ([docs.cloud.google.com](https://docs.cloud.google.com/vertex-ai/docs/predictions/online-prediction-logging?utm_source=chatgpt.com))
 
 ---
 
-# 🔟 Logs Explorer Queries for Validation
+## 2. What you should expect to see in Logs Explorer
+
+For a deployed Model Garden endpoint, Logs Explorer is useful for:
+
+* **Access logging**: per-request logs that include **timestamp and latency**.
+* **Container logging**: application stdout/stderr from the inference container.
+* **Audit logs**: endpoint create/update/deploy actions, if you want to validate configuration changes.
+
+What you should **not** expect in Logs Explorer:
+
+* **Request-response logging payloads** — Google stores these in **BigQuery**, not Logs Explorer. ([docs.cloud.google.com](https://docs.cloud.google.com/vertex-ai/docs/predictions/online-prediction-logging?utm_source=chatgpt.com))
 
 ---
 
-## 1️⃣ Basic: Verify logs are coming from all projects
+## 3. Preconditions
+
+Before running the test cases:
+
+1. The model must already be **deployed to a Vertex AI Endpoint**.
+2. At least **1–2 requests** must have been sent to the endpoint.
+3. **Access logging** must be enabled if you want to validate per-request timestamp/latency. Google states access logging is disabled by default.
+4. **Container logging** should be enabled if you want to validate stdout/stderr messages. Google states container logging is enabled by default on `v1` endpoints and disabled by default on `v1beta1`.
+5. You must have **Logs Explorer access** to the project that receives the logs. ([docs.cloud.google.com](https://docs.cloud.google.com/vertex-ai/docs/predictions/online-prediction-logging?utm_source=chatgpt.com))
+
+---
+
+## 4. Base Logs Explorer query to start with
+
+Use this as the starting point for most validations:
 
 ```text
 resource.type="aiplatform.googleapis.com/Endpoint"
-timestamp >= "-2d"
 ```
 
-👉 Purpose:
-
-* Confirms **logs exist in last 2 days**
-* First sanity check for unified scope
+This is the correct Vertex AI monitored resource type for deployed models/endpoints in Cloud Logging/Monitoring. The resource type exposes labels such as `resource_container`, `location`, and `endpoint_id`. ([docs.cloud.google.com](https://docs.cloud.google.com/monitoring/api/resources?utm_source=chatgpt.com))
 
 ---
 
-## 2️⃣ Project-wise breakdown
+## 5. Validation cases
+
+### TC-01 — Confirm that Vertex AI endpoint logs are visible at all
+
+**Objective**
+Verify that the deployed endpoint is producing logs in Cloud Logging.
+
+**Query**
 
 ```text
 resource.type="aiplatform.googleapis.com/Endpoint"
-timestamp >= "-2d"
-| stats count() by resource.labels.project_id
 ```
 
-👉 Validates:
+**Steps**
 
-* All onboarded projects are visible under GCO scope
-* Compare against expected project list
+1. Open Logs Explorer.
+2. Select the project where the endpoint is deployed.
+3. Run the query.
+4. Set the time range to the last **30 minutes**.
+5. If nothing appears, expand to **Last 24 hours**.
+
+**Expected result**
+
+* At least one log entry appears if logging is enabled and traffic exists.
+* If no log appears, that usually means either no traffic occurred or the relevant logging type was not enabled.
+
+**What to capture**
+
+* Screenshot of the query result
+* Timestamp of the most recent entry
+* `endpoint_id` shown in the resource section
 
 ---
 
-## 3️⃣ Model-wise breakdown
+### TC-02 — Confirm the endpoint resource labels
+
+**Objective**
+Verify that the logs carry the expected Vertex AI endpoint labels.
+
+**Query**
 
 ```text
 resource.type="aiplatform.googleapis.com/Endpoint"
-timestamp >= "-2d"
-| stats count() by jsonPayload.model
 ```
 
-👉 Validates:
+**Steps**
 
-* Model names are present in logs
-* Helps map to `model_user_id` used in metrics
+1. Open any matching log entry.
+2. Inspect the **Resource** section.
+3. Confirm these labels are present:
+
+   * `resource_container`
+   * `location`
+   * `endpoint_id`
+
+**Expected result**
+
+* The log entry clearly shows the endpoint-level resource labels.
+* These labels can be used to correlate logs back to the deployed endpoint.
+
+**Why this matters**
+
+* It proves the log belongs to the correct Model Garden endpoint, not just a generic Cloud Logging entry. ([docs.cloud.google.com](https://docs.cloud.google.com/monitoring/api/resources?utm_source=chatgpt.com))
 
 ---
 
-## 4️⃣ Project + Model mapping (MOST IMPORTANT)
+### TC-03 — Validate access logging for request timing
+
+**Objective**
+Check that access logs are present and that they include request timing information.
+
+**Query**
 
 ```text
 resource.type="aiplatform.googleapis.com/Endpoint"
-timestamp >= "-2d"
-| stats count() by resource.labels.project_id, jsonPayload.model
 ```
 
-👉 This is your **gold validation query**
+**Steps**
 
-* Confirms:
+1. Run the base query.
+2. Open one endpoint log entry.
+3. Look for the access-log detail that includes **timestamp** and **latency**.
 
-  * model exists under correct project
-  * unified scoping is working properly
+**Expected result**
+
+* The log entry shows per-request timing information.
+* The entry can be correlated with the approximate request time.
+
+**Why this matters**
+
+* Access logging is the main Logs Explorer signal for request-level debugging in Vertex AI. Google documents that access logging records timestamp and latency for each request. ([docs.cloud.google.com](https://docs.cloud.google.com/vertex-ai/docs/predictions/online-prediction-logging?utm_source=chatgpt.com))
 
 ---
 
-## 5️⃣ Error logs (non-200 responses)
+### TC-04 — Validate container logs at ERROR level
+
+**Objective**
+Confirm that container stderr / error output is visible in Logs Explorer.
+
+**Query**
 
 ```text
 resource.type="aiplatform.googleapis.com/Endpoint"
-timestamp >= "-2d"
-jsonPayload.status_code >= 400
+severity>=ERROR
 ```
 
-👉 Validates:
+**Steps**
 
-* Error visibility across projects
-* Useful for your **error alert correlation**
+1. Run the query in the project where the endpoint is deployed.
+2. Make one inference request that could produce an error message, or check existing container output.
+3. Open the matching log entry.
+
+**Expected result**
+
+* If the model container writes to stderr, the entry appears with `ERROR` severity.
+* You can see the application message in the log body.
+
+**Why this matters**
+
+* Google says container logging captures stdout and stderr. In Python, stderr is commonly surfaced as `ERROR` in Cloud Logging. ([docs.cloud.google.com](https://docs.cloud.google.com/vertex-ai/docs/predictions/online-prediction-logging?utm_source=chatgpt.com))
 
 ---
 
-## 6️⃣ Error breakdown by project + model
+### TC-05 — Validate container logs at INFO level
+
+**Objective**
+Confirm that application logs printed to stdout are visible as informational logs.
+
+**Query**
 
 ```text
 resource.type="aiplatform.googleapis.com/Endpoint"
-timestamp >= "-2d"
-jsonPayload.status_code >= 400
-| stats count() by resource.labels.project_id, jsonPayload.model
+severity=INFO
 ```
 
-👉 Validates:
+**Steps**
 
-* Which models are failing
-* Whether alerts should have triggered
+1. Make sure the container writes some logs to stdout.
+2. Run the query.
+3. Open the matching entry.
+
+**Expected result**
+
+* INFO-level container output appears if the container writes to stdout.
+* This is the preferred way to validate application-level debug messages without forcing errors.
+
+**Why this matters**
+
+* Google explicitly notes that stdout is the recommended stream if you want container logs to appear at INFO rather than ERROR. ([docs.cloud.google.com](https://docs.cloud.google.com/vertex-ai/docs/predictions/online-prediction-logging?utm_source=chatgpt.com))
 
 ---
 
-## 7️⃣ High traffic models (top N)
+### TC-06 — Validate log presence for a single request window
+
+**Objective**
+Correlate a single inference request with the corresponding log entry.
+
+**Query**
 
 ```text
 resource.type="aiplatform.googleapis.com/Endpoint"
-timestamp >= "-2d"
-| stats count() as request_count by jsonPayload.model
-| sort desc request_count
-| limit 10
 ```
 
-👉 Helps:
+**Steps**
 
-* Identify active models
-* Cross-check with Metrics Explorer
+1. Send one request to the endpoint.
+2. Note the approximate request time.
+3. Set the Logs Explorer time window to **15 minutes around that request**.
+4. Run the query.
+
+**Expected result**
+
+* The request is visible in the log timeline.
+* The log entry timestamp should align with the request time.
+
+**Why this matters**
+
+* This is the easiest way to prove logs can be used for debugging and alert correlation.
 
 ---
 
-## 8️⃣ Latency validation logs
+### TC-07 — Validate logs for Unified Project 1
+
+**Objective**
+Confirm that the first unified project produces endpoint logs.
+
+**Query**
 
 ```text
 resource.type="aiplatform.googleapis.com/Endpoint"
-timestamp >= "-2d"
-| stats avg(jsonPayload.latency) as avg_latency by resource.labels.project_id, jsonPayload.model
 ```
 
-👉 Validates:
+**Steps**
 
-* Latency presence in logs
-* Cross-check with your **latency alerts (p95/p99)**
+1. Use the Logs Explorer project picker and select **Unified Project 1**.
+2. Run the query.
+3. Confirm the log entry count.
+4. Open the latest entry and verify the endpoint labels.
+
+**Expected result**
+
+* Logs from Unified Project 1 appear.
+* The log entry belongs to the correct endpoint.
+
+**Why this matters**
+
+* It proves the unified observability setup is not losing logs for one of the onboarded projects.
 
 ---
 
-## 9️⃣ Unified scope validation (cross-project visibility)
+### TC-08 — Validate logs for Unified Project 2
+
+**Objective**
+Confirm that the second unified project also produces endpoint logs.
+
+**Query**
 
 ```text
 resource.type="aiplatform.googleapis.com/Endpoint"
-timestamp >= "-2d"
-| stats count_distinct(resource.labels.project_id)
 ```
 
-👉 Expected:
+**Steps**
 
-* Should return **number of onboarded projects (e.g., 2 unified + 1 traditional)**
+1. Switch the Logs Explorer project picker to **Unified Project 2**.
+2. Run the same query.
+3. Confirm log visibility and resource labels.
+
+**Expected result**
+
+* Logs are visible for Unified Project 2 as well.
+* The logs are distinguishable from Unified Project 1 through the resource labels.
+
+**Why this matters**
+
+* This confirms that both projects are observable, not just one.
 
 ---
 
-## 🔟 Deep inspection (raw logs for one model)
+### TC-09 — Validate expected absence of request-response logs in Logs Explorer
+
+**Objective**
+Confirm that request-response payloads are **not** expected in Logs Explorer.
+
+**Query**
 
 ```text
 resource.type="aiplatform.googleapis.com/Endpoint"
-timestamp >= "-2d"
-jsonPayload.model="YOUR_MODEL_NAME"
 ```
 
-👉 Use this to:
+**Steps**
 
-* Inspect actual payload
-* Verify:
+1. Search in Logs Explorer for request payload content.
+2. Inspect the results.
+3. Compare with the docs-enabled logging mode.
 
-  * model field
-  * status code
-  * latency
-  * request structure
+**Expected result**
 
----
+* You should **not** expect full request/response payloads in Logs Explorer.
+* Google states request-response logging is stored in **BigQuery** rather than Cloud Logging. ([docs.cloud.google.com](https://docs.cloud.google.com/vertex-ai/docs/predictions/online-prediction-logging?utm_source=chatgpt.com))
 
-# 🧠 How to Use These Together (SRE Workflow)
+**Why this matters**
 
-Run in this order:
-
-1. **Query 1 → 2 → 9**
-   👉 Validate scoping & project visibility
-
-2. **Query 3 → 4**
-   👉 Validate model mapping
-
-3. **Query 5 → 6**
-   👉 Validate error signals
-
-4. **Query 7 → 8**
-   👉 Validate traffic + latency
-
-5. **Query 10**
-   👉 Deep debug if something looks off
+* It prevents false expectations during testing. If you need exact request/response payloads, you must validate them in BigQuery, not Logs Explorer.
 
 ---
 
-# ⚠️ Important Notes (Based on Your Setup)
+### TC-10 — Validate the “no traffic / low traffic” case
 
-* `jsonPayload.model` may vary depending on log format
-  👉 Sometimes it could be:
+**Objective**
+Confirm that an empty result can be a valid outcome when there is no traffic or logging is not enabled.
 
-  * `jsonPayload.model_id`
-  * `jsonPayload.endpoint_id`
+**Query**
 
-* If field not found:
-  👉 Open one log → check exact field name → adjust query
+```text
+resource.type="aiplatform.googleapis.com/Endpoint"
+```
+
+**Steps**
+
+1. Run the query in a very short window, such as the last **5 minutes**.
+2. If no result appears, widen the window to **24 hours**.
+3. Check whether access logging and container logging are enabled for the endpoint.
+
+**Expected result**
+
+* If traffic is low, no logs in a short window is acceptable.
+* If traffic exists but logs are still absent, check logging configuration.
+
+**Why this matters**
+
+* In your environment, traffic may be limited, so “no data” is often a logging-window issue rather than a failure.
 
 ---
 
-# 💡 Pro Tip (Very Useful for Your Case)
+## 6. How to read the result
 
-Since you’re debugging **metrics vs logs mismatch**:
+When a log entry appears, focus on these parts:
 
-👉 Pick ONE model from logs (Query 4)
-👉 Then:
+* **Resource section**
+  Confirms the endpoint identity through `resource_container`, `location`, and `endpoint_id`.
 
-* check it in Metrics Explorer
-* check alert behavior
+* **Timestamp**
+  Confirms when the request or container event occurred.
 
-This gives you **end-to-end validation**
+* **Severity**
+  Helps distinguish debug/info output from errors.
+
+* **Message body**
+  Shows stdout/stderr output or access-log details.
+
+* **Project selection**
+  Confirms you are looking at the correct unified project.
+
+---
+
+## 7. Notes and gotchas
+
+* **Access logging is disabled by default** for online inference endpoints, so if you do not see per-request logs, the feature may not have been enabled.
+* **Container logging behavior differs by endpoint version**: enabled by default on `v1`, disabled by default on `v1beta1`.
+* **Request-response logging is BigQuery-based**, so it is not part of Logs Explorer validation.
+* **Model Garden metrics and logs are not the same thing**: the metrics use `PublisherModel`, while Logs Explorer validation is centered on the deployed `Endpoint` resource. ([docs.cloud.google.com](https://docs.cloud.google.com/vertex-ai/docs/predictions/online-prediction-logging?utm_source=chatgpt.com) [docs.cloud.google.com](https://docs.cloud.google.com/monitoring/api/resources?utm_source=chatgpt.com))
+
+---
+
+## 8. Validation summary template
+
+You can paste this at the bottom of your test document:
+
+| Case                                             | Status      | Evidence   |
+| ------------------------------------------------ | ----------- | ---------- |
+| TC-01 Base endpoint logs visible                 | Pass / Fail | Screenshot |
+| TC-02 Resource labels present                    | Pass / Fail | Screenshot |
+| TC-03 Access logging timestamp + latency         | Pass / Fail | Screenshot |
+| TC-04 Container logs at ERROR                    | Pass / Fail | Screenshot |
+| TC-05 Container logs at INFO                     | Pass / Fail | Screenshot |
+| TC-06 Time correlation with request              | Pass / Fail | Screenshot |
+| TC-07 Unified Project 1 logs                     | Pass / Fail | Screenshot |
+| TC-08 Unified Project 2 logs                     | Pass / Fail | Screenshot |
+| TC-09 Request-response logs not in Logs Explorer | Pass / Fail | Note       |
+| TC-10 Low-traffic / no-data handling             | Pass / Fail | Note       |
 
 ---
 
