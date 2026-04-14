@@ -1,0 +1,222 @@
+
+Below are **10 high-value Logs Explorer queries** to validate:
+
+* ✅ Project-level visibility
+* ✅ Model-level visibility
+* ✅ Unified scope (GCO project seeing other projects)
+* ✅ Traffic, errors, latency, and label presence
+
+I’ll keep them **practical + directly usable in Logs Explorer (LQL)**.
+
+---
+
+# 🔟 Logs Explorer Queries for Validation
+
+---
+
+## 1️⃣ Basic: Verify logs are coming from all projects
+
+```text
+resource.type="aiplatform.googleapis.com/Endpoint"
+timestamp >= "-2d"
+```
+
+👉 Purpose:
+
+* Confirms **logs exist in last 2 days**
+* First sanity check for unified scope
+
+---
+
+## 2️⃣ Project-wise breakdown
+
+```text
+resource.type="aiplatform.googleapis.com/Endpoint"
+timestamp >= "-2d"
+| stats count() by resource.labels.project_id
+```
+
+👉 Validates:
+
+* All onboarded projects are visible under GCO scope
+* Compare against expected project list
+
+---
+
+## 3️⃣ Model-wise breakdown
+
+```text
+resource.type="aiplatform.googleapis.com/Endpoint"
+timestamp >= "-2d"
+| stats count() by jsonPayload.model
+```
+
+👉 Validates:
+
+* Model names are present in logs
+* Helps map to `model_user_id` used in metrics
+
+---
+
+## 4️⃣ Project + Model mapping (MOST IMPORTANT)
+
+```text
+resource.type="aiplatform.googleapis.com/Endpoint"
+timestamp >= "-2d"
+| stats count() by resource.labels.project_id, jsonPayload.model
+```
+
+👉 This is your **gold validation query**
+
+* Confirms:
+
+  * model exists under correct project
+  * unified scoping is working properly
+
+---
+
+## 5️⃣ Error logs (non-200 responses)
+
+```text
+resource.type="aiplatform.googleapis.com/Endpoint"
+timestamp >= "-2d"
+jsonPayload.status_code >= 400
+```
+
+👉 Validates:
+
+* Error visibility across projects
+* Useful for your **error alert correlation**
+
+---
+
+## 6️⃣ Error breakdown by project + model
+
+```text
+resource.type="aiplatform.googleapis.com/Endpoint"
+timestamp >= "-2d"
+jsonPayload.status_code >= 400
+| stats count() by resource.labels.project_id, jsonPayload.model
+```
+
+👉 Validates:
+
+* Which models are failing
+* Whether alerts should have triggered
+
+---
+
+## 7️⃣ High traffic models (top N)
+
+```text
+resource.type="aiplatform.googleapis.com/Endpoint"
+timestamp >= "-2d"
+| stats count() as request_count by jsonPayload.model
+| sort desc request_count
+| limit 10
+```
+
+👉 Helps:
+
+* Identify active models
+* Cross-check with Metrics Explorer
+
+---
+
+## 8️⃣ Latency validation logs
+
+```text
+resource.type="aiplatform.googleapis.com/Endpoint"
+timestamp >= "-2d"
+| stats avg(jsonPayload.latency) as avg_latency by resource.labels.project_id, jsonPayload.model
+```
+
+👉 Validates:
+
+* Latency presence in logs
+* Cross-check with your **latency alerts (p95/p99)**
+
+---
+
+## 9️⃣ Unified scope validation (cross-project visibility)
+
+```text
+resource.type="aiplatform.googleapis.com/Endpoint"
+timestamp >= "-2d"
+| stats count_distinct(resource.labels.project_id)
+```
+
+👉 Expected:
+
+* Should return **number of onboarded projects (e.g., 2 unified + 1 traditional)**
+
+---
+
+## 🔟 Deep inspection (raw logs for one model)
+
+```text
+resource.type="aiplatform.googleapis.com/Endpoint"
+timestamp >= "-2d"
+jsonPayload.model="YOUR_MODEL_NAME"
+```
+
+👉 Use this to:
+
+* Inspect actual payload
+* Verify:
+
+  * model field
+  * status code
+  * latency
+  * request structure
+
+---
+
+# 🧠 How to Use These Together (SRE Workflow)
+
+Run in this order:
+
+1. **Query 1 → 2 → 9**
+   👉 Validate scoping & project visibility
+
+2. **Query 3 → 4**
+   👉 Validate model mapping
+
+3. **Query 5 → 6**
+   👉 Validate error signals
+
+4. **Query 7 → 8**
+   👉 Validate traffic + latency
+
+5. **Query 10**
+   👉 Deep debug if something looks off
+
+---
+
+# ⚠️ Important Notes (Based on Your Setup)
+
+* `jsonPayload.model` may vary depending on log format
+  👉 Sometimes it could be:
+
+  * `jsonPayload.model_id`
+  * `jsonPayload.endpoint_id`
+
+* If field not found:
+  👉 Open one log → check exact field name → adjust query
+
+---
+
+# 💡 Pro Tip (Very Useful for Your Case)
+
+Since you’re debugging **metrics vs logs mismatch**:
+
+👉 Pick ONE model from logs (Query 4)
+👉 Then:
+
+* check it in Metrics Explorer
+* check alert behavior
+
+This gives you **end-to-end validation**
+
+---
+
