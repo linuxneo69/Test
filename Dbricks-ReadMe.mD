@@ -1,4 +1,3 @@
-```markdown
 # Databricks on AWS – SRE & Observability Deep Dive Guide
 
 ## Purpose: Learning, Onboarding, and Internal Knowledge Sharing
@@ -430,7 +429,4 @@ Track:
 5. Build internal dashboards
 
 ---
-
-# End of Document
-```
 
